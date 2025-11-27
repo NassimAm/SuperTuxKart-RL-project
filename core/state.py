@@ -2,6 +2,9 @@ from typing import TypedDict
 from enum import Enum
 import numpy as np
 import torch
+from core.action import Action
+
+# TODO: check missing attachments, phases, powerups, item types
 
 
 class Attachment(Enum):
@@ -28,20 +31,9 @@ class Attachment(Enum):
 
 
 class Phase(Enum):
-    TRACK_INTRO_PHASE = 0
-    SETUP_PHASE = 1
-    WAIT_FOR_SERVER_PHASE = 2
-    SERVER_READY_PHASE = 3
-    READY_PHASE = 4
-    SET_PHASE = 5
-    GO_PHASE = 6
-    MUSIC_PHASE = 7
-    RACE_PHASE = 8
-    DELAY_FINISH_PHASE = 9
-    RESULT_DISPLAY_PHASE = 10
-    FINISH_PHASE = 11
-    IN_GAME_MENU_PHASE = 12
-    UNDEFINED_PHASE = 13
+    READY_PHASE = 0  # From step 0 to step 10 exclusive
+    SET_PHASE = 1  # From step 10 to step 20 exclusive
+    RACE_PHASE = 2  # From step 20
 
     def encode(self):
         """Encode the Phase value into one-hot encoding."""
@@ -56,6 +48,14 @@ class Phase(Enum):
         values_list = [e.value for e in Phase]
         index = int(np.argmax(one_hot))
         return Phase(values_list[index])
+
+    def get_ready_phase_limit() -> int:
+        """Get the step limit for the READY_PHASE."""
+        return 10
+
+    def get_set_phase_limit() -> int:
+        """Get the step limit for the SET_PHASE."""
+        return 20
 
 
 class Powerup(Enum):
@@ -112,11 +112,14 @@ class ItemType(Enum):
 class State(TypedDict):
     """Base class for states in the environment."""
 
+    # Model observations ==========================
+    rank: float
+    """Normalized position in the race. 0.0 for last place, 1.0 for first place and others in between."""
     attachment: Attachment
     """Current attachement on the kart."""
     attachment_time_left: float
     """Time left for the current attachment."""
-    aux_ticks: float
+    aux_ticks: float  # TODO: remove this because it's not useful (always 0.0)
     """Auxiliary ticks for various purposes."""
     center_path: np.ndarray
     """Center path coordinates."""
@@ -130,12 +133,20 @@ class State(TypedDict):
     """Front vector coordinates of the kart."""
     items_position: np.ndarray
     """Positions of items on the track."""
-    items_type: np.ndarray[ItemType]
+    items_type: list[ItemType]
     """Types of items on the track."""
     jumping: bool
     """Indicates if the kart is jumping."""
+    stuck: bool
+    """Indicates if the kart is stuck."""
     karts_position: np.ndarray
     """Positions of other karts."""
+    karts_rel_rank: np.ndarray
+    """Ranks of other karts relative to the current kart."""
+    karts_velocity: np.ndarray
+    """Velocity of other karts."""
+    karts_distance: np.ndarray
+    """Track distances to other karts."""
     max_steer_angle: float
     """Maximum steering angle."""
     paths_distance: np.ndarray
@@ -148,6 +159,8 @@ class State(TypedDict):
     """Widths of the paths."""
     phase: Phase
     """Current phase of the race."""
+    nb_steps_since_set: int
+    """Number of steps since the SET phase began."""
     powerup: Powerup
     """Current powerup type."""
     shield_time: float
@@ -156,8 +169,24 @@ class State(TypedDict):
     """Skeed factor of the kart."""
     velocity: np.ndarray
     """Velocity vector of the kart."""
+    # Expert observations ===========================
+    current_lap: int
+    """Current lap number."""
+    game_time: float
+    """Current game time."""
+    nitro_time_left: float
+    """Time left for nitro effect."""
+    zipper_time_left: float
+    """Time left for zipper effect."""
+    skid_direction: int
+    """Direction of the skid: -1 for left, 1 for right, 0 for no skid."""
+    time_since_skid_start: float
+    """Time since the skid started."""
+    prev_actions: list[Action]
+    """List of previous actions taken."""
 
     CONTINUOUS_KEYS = [
+        'rank',
         'attachment_time_left',
         'aux_ticks',
         'center_path',
@@ -167,14 +196,24 @@ class State(TypedDict):
         'front',
         'items_position',
         'karts_position',
+        'karts_rel_rank',
+        'karts_velocity',
+        'karts_distance',
         'max_steer_angle',
         'paths_distance',
         'paths_end',
         'paths_start',
         'paths_width',
+        'nb_steps_since_set',
         'shield_time',
         'skeed_factor',
-        'velocity'
+        'velocity',
+        'current_lap',
+        'game_time',
+        'nitro_time_left',
+        'zipper_time_left',
+        'skid_direction',
+        'time_since_skid_start'
     ]
 
     DISCRETE_KEYS = [
@@ -182,132 +221,99 @@ class State(TypedDict):
         'items_type',
         'jumping',
         'phase',
-        'powerup'
+        'powerup',
+        'stuck',
+        'prev_actions'
     ]
 
-    def from_env(flattened_state: dict[str, np.ndarray], state_paths: int = 5, state_items: int = 5,
-                 state_karts: int = 5) -> 'State':
+    def from_env(state: dict) -> 'State':
         """Create a State from a flattened array representation."""
 
-        continuous_state = flattened_state['continuous']
-        attachment_time_left = float(continuous_state[0])
-        aux_ticks = float(continuous_state[1])
-        center_path = continuous_state[2:5]
-        center_path_distance = float(continuous_state[5])
-        distance_down_track = float(continuous_state[6])
-        energy = float(continuous_state[7])
-        front = continuous_state[8:11]
-        cur_idx = 11
-        next_idx = cur_idx + state_items * 3
-        items_position = continuous_state[cur_idx:next_idx].reshape(state_items, 3)
-        cur_idx = next_idx
-        next_idx = cur_idx + state_karts * 3
-        karts_position = continuous_state[cur_idx:next_idx].reshape(state_karts, 3)
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        max_steer_angle = float(continuous_state[cur_idx])
-        cur_idx = next_idx
-        next_idx = cur_idx + state_paths * 2
-        paths_distance = continuous_state[cur_idx:next_idx].reshape(state_paths, 2)
-        cur_idx = next_idx
-        next_idx = cur_idx + state_paths * 3
-        paths_end = continuous_state[cur_idx:next_idx].reshape(state_paths, 3)
-        cur_idx = next_idx
-        next_idx = cur_idx + state_paths * 3
-        paths_start = continuous_state[cur_idx:next_idx].reshape(state_paths, 3)
-        cur_idx = next_idx
-        next_idx = cur_idx + state_paths
-        paths_width = continuous_state[cur_idx:next_idx]
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        shield_time = float(continuous_state[cur_idx])
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        skeed_factor = float(continuous_state[cur_idx])
-        cur_idx = next_idx
-        next_idx = cur_idx + 3
-        velocity = continuous_state[cur_idx:next_idx]
-
-        discrete_state = flattened_state['discrete']
-        attachment = Attachment(int(discrete_state[0]))
-        cur_idx = 1
-        next_idx = cur_idx + state_items
-        items_type = np.array([ItemType(e) for e in discrete_state[cur_idx:next_idx]])
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        jumping = bool(discrete_state[cur_idx])
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        phase = Phase(int(discrete_state[cur_idx]))
-        cur_idx = next_idx
-        next_idx = cur_idx + 1
-        powerup = Powerup(int(discrete_state[cur_idx]))
-
         return State(
-            attachment=attachment,
-            attachment_time_left=attachment_time_left,
-            aux_ticks=aux_ticks,
-            center_path=center_path,
-            center_path_distance=center_path_distance,
-            distance_down_track=distance_down_track,
-            energy=energy,
-            front=front,
-            items_position=items_position,
-            items_type=items_type,
-            jumping=jumping,
-            karts_position=karts_position,
-            max_steer_angle=max_steer_angle,
-            paths_distance=paths_distance,
-            paths_end=paths_end,
-            paths_start=paths_start,
-            paths_width=paths_width,
-            phase=phase,
-            powerup=powerup,
-            shield_time=shield_time,
-            skeed_factor=skeed_factor,
-            velocity=velocity
+            rank=state['rank'],
+            attachment=Attachment(state['attachment']),
+            attachment_time_left=state['attachment_time_left'],
+            aux_ticks=state['aux_ticks'],
+            center_path=state['center_path'],
+            center_path_distance=state['center_path_distance'],
+            distance_down_track=state['distance_down_track'],
+            energy=state['energy'],
+            front=state['front'],
+            items_position=state['items_position'],
+            items_type=[ItemType(e) for e in state['items_type']],
+            jumping=bool(state['jumping']),
+            stuck=bool(state['stuck']),
+            karts_position=state['karts_position'],
+            karts_rel_rank=state['karts_rel_rank'],
+            karts_velocity=state['karts_velocity'],
+            karts_distance=state['karts_distance'],
+            max_steer_angle=state['max_steer_angle'],
+            paths_distance=state['paths_distance'],
+            paths_end=state['paths_end'],
+            paths_start=state['paths_start'],
+            paths_width=state['paths_width'],
+            phase=Phase(state['phase']),
+            nb_steps_since_set=state['nb_steps_since_set'],
+            powerup=Powerup(state['powerup']),
+            shield_time=state['shield_time'],
+            skeed_factor=state['skeed_factor'],
+            velocity=state['velocity'],
+            current_lap=state['current_lap'],
+            game_time=state['game_time'],
+            nitro_time_left=state['nitro_time_left'],
+            zipper_time_left=state['zipper_time_left'],
+            skid_direction=state['skid_direction'],
+            time_since_skid_start=state['time_since_skid_start'],
+            prev_actions=[Action.from_env(a) for a in state['prev_actions']]
         )
 
     def to_env(state: 'State') -> dict[str, np.ndarray]:
         """Convert the state to the environment's expected format."""
 
-        continuous_parts = [
-            np.array([state['attachment_time_left']]),
-            np.array([state['aux_ticks']]),
-            state['center_path'].reshape(-1),
-            np.array([state['center_path_distance']]),
-            np.array([state['distance_down_track']]),
-            np.array([state['energy']]),
-            state['front'].reshape(-1),
-            state['items_position'].reshape(-1),
-            state['karts_position'].reshape(-1),
-            np.array([state['max_steer_angle']]),
-            state['paths_distance'].reshape(-1),
-            state['paths_end'].reshape(-1),
-            state['paths_start'].reshape(-1),
-            state['paths_width'].reshape(-1),
-            np.array([state['shield_time']]),
-            np.array([state['skeed_factor']]),
-            state['velocity'].reshape(-1),
-        ]
-
-        discrete_parts = [
-            np.array([state['attachment'].value]),
-            np.array([e.value for e in state['items_type']]),
-            np.array([int(state['jumping'])]),
-            np.array([state['phase'].value]),
-            np.array([state['powerup'].value]),
-        ]
-
         return {
-            'continuous': np.concatenate(continuous_parts),
-            'discrete': np.concatenate(discrete_parts)
+            'rank': state['rank'],
+            'attachment': state['attachment'].value,
+            'attachment_time_left': state['attachment_time_left'],
+            'aux_ticks': state['aux_ticks'],
+            'center_path': state['center_path'],
+            'center_path_distance': state['center_path_distance'],
+            'distance_down_track': state['distance_down_track'],
+            'energy': state['energy'],
+            'front': state['front'],
+            'items_position': state['items_position'],
+            'items_type': np.array([e.value for e in state['items_type']]),
+            'jumping': state['jumping'],
+            'stuck': state['stuck'],
+            'karts_position': state['karts_position'],
+            'karts_rel_rank': state['karts_rel_rank'],
+            'karts_velocity': state['karts_velocity'],
+            'karts_distance': state['karts_distance'],
+            'max_steer_angle': state['max_steer_angle'],
+            'paths_distance': state['paths_distance'],
+            'paths_end': state['paths_end'],
+            'paths_start': state['paths_start'],
+            'paths_width': state['paths_width'],
+            'phase': state['phase'].value,
+            'nb_steps_since_set': state['nb_steps_since_set'],
+            'powerup': state['powerup'].value,
+            'shield_time': state['shield_time'],
+            'skeed_factor': state['skeed_factor'],
+            'velocity': state['velocity'],
+            'current_lap': state['current_lap'],
+            'game_time': state['game_time'],
+            'nitro_time_left': state['nitro_time_left'],
+            'zipper_time_left': state['zipper_time_left'],
+            'skid_direction': state['skid_direction'],
+            'time_since_skid_start': state['time_since_skid_start'],
+            'prev_actions': [Action.to_env(a) for a in state['prev_actions']]
         }
 
     def to_model(state: 'State') -> torch.Tensor:
         """Convert the state to the model's expected format."""
 
-        continuous_parts = [
+        return torch.concat([
+            torch.tensor([state['rank']]),
+            torch.tensor(state['attachment'].encode()),
             torch.tensor([state['attachment_time_left']]),
             torch.tensor([state['aux_ticks']]),
             torch.tensor(state['center_path'].reshape(-1)),
@@ -316,23 +322,22 @@ class State(TypedDict):
             torch.tensor([state['energy']]),
             torch.tensor(state['front'].reshape(-1)),
             torch.tensor(state['items_position'].reshape(-1)),
+            torch.tensor(np.concatenate([e.encode() for e in state['items_type']])),
+            torch.tensor([int(state['jumping'])]),
+            torch.tensor([int(state['stuck'])]),
             torch.tensor(state['karts_position'].reshape(-1)),
+            torch.tensor(state['karts_rel_rank'].reshape(-1)),
+            torch.tensor(state['karts_velocity'].reshape(-1)),
+            torch.tensor(state['karts_distance'].reshape(-1)),
             torch.tensor([state['max_steer_angle']]),
             torch.tensor(state['paths_distance'].reshape(-1)),
             torch.tensor(state['paths_end'].reshape(-1)),
             torch.tensor(state['paths_start'].reshape(-1)),
             torch.tensor(state['paths_width'].reshape(-1)),
+            torch.tensor(state['phase'].encode()),
+            torch.tensor([state['nb_steps_since_set']]),
+            torch.tensor(state['powerup'].encode()),
             torch.tensor([state['shield_time']]),
             torch.tensor([state['skeed_factor']]),
-            torch.tensor(state['velocity'].reshape(-1)),
-        ]
-
-        discrete_parts = [
-            torch.tensor(state['attachment'].encode()),
-            torch.tensor(np.concatenate([e.encode() for e in state['items_type']])),
-            torch.tensor([int(state['jumping'])]),
-            torch.tensor(state['phase'].encode()),
-            torch.tensor(state['powerup'].encode()),
-        ]
-
-        return torch.cat(continuous_parts + discrete_parts)
+            torch.tensor(state['velocity'].reshape(-1))
+        ])

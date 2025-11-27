@@ -1,0 +1,2 @@
+- In the evaluation, would we be evaluated all at once? i.e. a race that contains all teams and race together? Or there is a max number of karts per race?
+- In the evaluation, how many laps there would be? is it random from a set of values or always fixed?

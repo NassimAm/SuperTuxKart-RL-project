@@ -6,8 +6,8 @@ import torch
 class Action(TypedDict):
     """Base class for actions in the environment."""
 
-    acceleration: int = 0
-    """Acceleration component of the action."""
+    acceleration: float = 0.0
+    """Acceleration component of the action between 0.0 and 1.0."""
     brake: bool = False
     """Brake component of the action."""
     drift: bool = False
@@ -18,91 +18,89 @@ class Action(TypedDict):
     """Nitro boost component of the action."""
     rescue: bool = False
     """Rescue component of the action."""
-    steer: int = 0
-    """Steering component of the action."""
+    steer: float = 0.0
+    """Steering component of the action between -1.0 and 1.0 (positive -> right, negative -> left)."""
+    look_back: bool = False  # TODO: see how to integrate this in the action space
+    """Look back component of the action."""
 
-    BRAKE_DIM = 2
-    DRIFT_DIM = 2
-    FIRE_DIM = 2
-    NITRO_DIM = 2
-    RESCUE_DIM = 2
+    CONTINUOUS_ACTIONS = ['acceleration', 'steer']
+    DISCRETE_ACTIOSNS = ['brake', 'drift', 'fire', 'nitro', 'rescue']
 
-    NAMES = [
-        'acceleration',
-        'brake',
-        'drift',
-        'fire',
-        'nitro',
-        'rescue',
-        'steer'
-    ]
-
-    def from_env(array: np.ndarray) -> 'Action':
+    def from_env(input_action: dict[str, np.ndarray]) -> 'Action':
         """Create an Action from a list representation."""
         return Action(
-            acceleration=int(array[0]),
-            brake=bool(array[1]),
-            drift=bool(array[2]),
-            fire=bool(array[3]),
-            nitro=bool(array[4]),
-            rescue=bool(array[5]),
-            steer=int(array[6]),
+            acceleration=input_action['acceleration'],
+            brake=bool(input_action['brake']),
+            drift=bool(input_action['drift']),
+            fire=bool(input_action['fire']),
+            nitro=bool(input_action['nitro']),
+            rescue=bool(input_action['rescue']),
+            steer=input_action['steer'],
+            look_back=False
         )
 
     def to_env(action: 'Action') -> np.ndarray:
         """Convert the action to the environment's expected format."""
-        return np.array([
-            action['acceleration'],
-            int(action['brake']),
-            int(action['drift']),
-            int(action['fire']),
-            int(action['nitro']),
-            int(action['rescue']),
-            action['steer'],
+        return {
+            'acceleration': action['acceleration'],
+            'brake': int(action['brake']),
+            'drift': int(action['drift']),
+            'fire': int(action['fire']),
+            'nitro': int(action['nitro']),
+            'rescue': int(action['rescue']),
+            'steer': action['steer']
+        }
+
+    def to_model(action: 'Action') -> list[torch.Tensor]:
+        """Convert the action to the model's expected format."""
+        return torch.cat([
+            torch.tensor([action['acceleration']], dtype=torch.float32),
+            torch.tensor([float(action['brake'])], dtype=torch.float32),
+            torch.tensor([float(action['drift'])], dtype=torch.float32),
+            torch.tensor([float(action['fire'])], dtype=torch.float32),
+            torch.tensor([float(action['nitro'])], dtype=torch.float32),
+            torch.tensor([float(action['rescue'])], dtype=torch.float32),
+            torch.tensor([action['steer']], dtype=torch.float32),
         ])
 
-    def to_model(action: 'Action', acceleration_steps: int = 5, steer_steps: int = 5) -> list[torch.Tensor]:
-        """Convert the action to the model's expected format."""
-        # Acceleration one-hot encoding
-        acceleration_one_hot = torch.zeros(acceleration_steps)
-        acceleration_one_hot[action['acceleration']] = 1.0
-        # Brake one-hot encoding
-        brake_one_hot = torch.zeros(Action.BRAKE_DIM)
-        brake_one_hot[int(action['brake'])] = 1.0
-        # Drift one-hot encoding
-        drift_one_hot = torch.zeros(Action.DRIFT_DIM)
-        drift_one_hot[int(action['drift'])] = 1.0
-        # Fire one-hot encoding
-        fire_one_hot = torch.zeros(Action.FIRE_DIM)
-        fire_one_hot[int(action['fire'])] = 1.0
-        # Nitro one-hot encoding
-        nitro_one_hot = torch.zeros(Action.NITRO_DIM)
-        nitro_one_hot[int(action['nitro'])] = 1.0
-        # Rescue one-hot encoding
-        rescue_one_hot = torch.zeros(Action.RESCUE_DIM)
-        rescue_one_hot[int(action['rescue'])] = 1.0
-        # Steering one-hot encoding
-        steer_one_hot = torch.zeros(steer_steps)
-        steer_one_hot[action['steer']] = 1.0
-        # Return as list of arrays
-        return [
-            acceleration_one_hot,
-            brake_one_hot,
-            drift_one_hot,
-            fire_one_hot,
-            nitro_one_hot,
-            rescue_one_hot,
-            steer_one_hot,
-        ]
-
-    def get_dims(acceleration_steps: int = 5, steer_steps: int = 7) -> list[int]:
+    def get_dims() -> list[int]:
         """Get the dimensions of each action component."""
         return [
-            acceleration_steps,
-            Action.BRAKE_DIM,
-            Action.DRIFT_DIM,
-            Action.FIRE_DIM,
-            Action.NITRO_DIM,
-            Action.RESCUE_DIM,
-            steer_steps,
+            1,  # acceleration
+            1,  # brake
+            1,  # drift
+            1,  # fire
+            1,  # nitro
+            1,  # rescue
+            1,  # steer
         ]
+
+    def acceleration_to_continuous(acceleration_discrete: int, acceleration_steps: int = 5) -> float:
+        """Convert discrete acceleration to continuous value between 0 and 1."""
+        assert acceleration_steps > 1, "acceleration_steps must be greater than 1"
+        if isinstance(acceleration_discrete, np.ndarray):
+            acceleration_discrete = acceleration_discrete.item()
+        return (acceleration_discrete / (acceleration_steps - 1))
+
+    def acceleration_to_discrete(acceleration_continuous: float, acceleration_steps: int = 5) -> int:
+        """Convert continuous acceleration value between 0 and 1 to discrete."""
+        assert acceleration_steps > 1, "acceleration_steps must be greater than 1"
+        if isinstance(acceleration_continuous, np.ndarray):
+            acceleration_continuous = acceleration_continuous.item()
+        clamped_value = max(0.0, min(1.0, acceleration_continuous))
+        return int(round(clamped_value * (acceleration_steps - 1)))
+
+    def steer_to_continuous(steer_discrete: int, steer_steps: int = 7) -> float:
+        """Convert discrete steer to continuous value between -1 and 1."""
+        assert (steer_steps > 1) and (steer_steps % 2 == 1), "steer_steps must be an odd number greater than 1"
+        if isinstance(steer_discrete, np.ndarray):
+            steer_discrete = steer_discrete.item()
+        return (steer_discrete / (steer_steps - 1)) * 2.0 - 1.0
+
+    def steer_to_discrete(steer_continuous: float, steer_steps: int = 7) -> int:
+        """Convert continuous steer value between -1 and 1 to discrete."""
+        assert (steer_steps > 1) and (steer_steps % 2 == 1), "steer_steps must be an odd number greater than 1"
+        if isinstance(steer_continuous, np.ndarray):
+            steer_continuous = steer_continuous.item()
+        clamped_value = max(-1.0, min(1.0, steer_continuous))
+        return int(round(((clamped_value + 1.0) / 2.0) * (steer_steps - 1)))
