@@ -1,3 +1,0 @@
-- Add fire backwards
-- Add aspiration
-- Add current position to the state
