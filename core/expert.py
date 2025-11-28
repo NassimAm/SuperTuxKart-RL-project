@@ -482,7 +482,7 @@ class ExpertAgent:
         # the computed average speed computed. The distance is always positive
         # due to the way m_distance_increase was computed, so average speed
         # is also always positive.
-        average_speed = 1.0 if state['game_time'] == 0 else kart_overall_distance / state['game_time']
+        average_speed = 1.0 if state['game_time'] == 0 else (kart_overall_distance / state['game_time'])
         # Avoid NAN or invalid results when average_speed is very low
         # or negative (which can happen if a kart drives backwards and
         # m_overall distance becomes smaller than -m_distance_increase).
@@ -580,29 +580,29 @@ class ExpertAgent:
             # Otherwise the bursting differences of the various nitro skill wouldn't matter here
             # In short races, most AI nitro usage may be at the end with the reserve
             # NOTE: Here The burster condition was removed
-            if time_until_fadeout > 0:
+            if time_until_fadeout >= 0:
                 energy_reserve = 0
 
-            if 2.5 * max_time_effect >= finish:
+            if (2.5 * max_time_effect) >= finish:
                 # Absolute reduction to avoid small amount of unburned nitro at the end
                 energy_reserve = min(energy_reserve, finish / (2.5 * max_time_effect / state['energy']) - 0.5)
-            if (1.8 * max_time_effect >= finish) or (state['energy'] >= 16):
+            if ((1.8 * max_time_effect) >= finish) or (state['energy'] >= 16):
                 big_reserve = True
         # Don't use nitro if there is already a nitro boost active
         # Nitro effect and fadeout may vary between karts type
         # So vary time according to kart properties
         if (((nitro_skill == 4) and (time_until_fadeout >= (ExpertAgent.NITRO_FADE_OUT_TIME * 0.5)) and (not big_reserve))
             or ((nitro_skill == 4) and (time_until_fadeout >= ExpertAgent.NITRO_FADE_OUT_TIME))
-            or ((nitro_skill == 3) and (time_until_fadeout >= (ExpertAgent.NITRO_FADE_OUT_TIME + ExpertAgent.NITRO_DURATION * 0.10)))
+            or ((nitro_skill == 3) and (time_until_fadeout >= (ExpertAgent.NITRO_FADE_OUT_TIME + ExpertAgent.NITRO_DURATION * 0.1)))
                 or ((nitro_skill == 2) and (time_until_fadeout >= (ExpertAgent.NITRO_FADE_OUT_TIME + ExpertAgent.NITRO_DURATION * 0.35)))):
             nitro_skill = 0
         # If trying to pass a bomb to a kart faster or far ahead, use nitro reserve
         speed = np.linalg.norm(state['velocity'])
-        if state['attachment'] == Attachment.BOMB and nitro_skill >= 2 and energy_reserve > 0:
+        if (state['attachment'] == Attachment.BOMB) and (nitro_skill >= 2) and (energy_reserve > 0):
             # NOTE: the following code is commented because there is no opponent kart speed in the state
             # if kart_ahead_position[2] > 10.0 or m_kart_ahead_speed > speed:
             #     energy_reserve = 0
-            if (kart_ahead_id is not None) and (state['karts_position'][kart_ahead_id][2] > 10.0):
+            if ((kart_ahead_id is not None) and (state['karts_position'][kart_ahead_id][2] > 10.0)) or (np.linalg.norm(state['karts_velocity'][kart_ahead_id]) > speed):
                 energy_reserve = 0
 
         # TODO : if a kart behind and reasonably close goes faster
@@ -631,10 +631,10 @@ class ExpertAgent:
         if (state['powerup'] == Powerup.ZIPPER) and (item_skill >= 2) and (speed > 1.0) and ((state['zipper_time_left'] - ExpertAgent.ZIPPER_FADE_OUT_TIME) <= 0):
             path_direction, last_path_id = self.__determine_direction(state, current_path_id=0)
             if path_direction == DirectionType.DIR_STRAIGHT:
-                diff = state['paths_distance'][last_path_id, 1] - state['distance_down_track']
+                diff = state['paths_distance'][last_path_id][1] - state['paths_distance'][0][0]
                 if diff < 0:
                     diff += self.env.track.length
-                if diff >= self.config['straight_length_for_zipper']:
+                if diff > self.config['straight_length_for_zipper']:
                     action['fire'] = True
 
     def __handle_acceleration_and_braking(self, state: State, action: Action, curve_radius: float,
@@ -682,7 +682,7 @@ class ExpertAgent:
         # kart will trigger skidding to allow for sharper turns, and hopefully
         # the situation will change so that the point p can then be reached
         # with a normal turn (it usually works out this way quite easily).
-        if abs(point[0]) > point[2]:
+        if abs(point[0]) > abs(point[2]):
             # Explicitely set the steering angle high enough to that the
             # steer function will request skidding. 0.1 is added in case
             # of floating point errors.
@@ -861,7 +861,7 @@ class ExpertAgent:
         print("Final steer value:", steer_value)
         action['steer'] = steer_value
 
-    def get_distance_to_path_center_at(self, path_start: np.ndarray, path_end: np.ndarray, position: np.ndarray):
+    def __get_distance_to_path_center_at(self, path_start: np.ndarray, path_end: np.ndarray, position: np.ndarray):
         """Calculates the distance from a given position to the center of a path segment.
 
         Args:
@@ -879,6 +879,30 @@ class ExpertAgent:
         center_path_distance = np.linalg.norm(x_orth)
         return center_path_distance
 
+    def check_if_pos_in_path(self, state: State, position: np.ndarray, path_id: int):
+        """Checks if a given position is within the path segment.
+
+        Args:
+            state (State): The current state of the environment.
+            position (np.ndarray): The position to check.
+            path_id (int): The ID of the path segment.
+
+        Returns:
+            bool: True if the position is within the path segment, False otherwise.
+        """
+        path_start = from_polar_to_cartesian(state['paths_start'][path_id])
+        path_end = from_polar_to_cartesian(state['paths_end'][path_id])
+        path_dir = path_end - path_start
+        path_length = np.linalg.norm(path_dir)
+        if path_length == 0:
+            return False
+        path_dir /= path_length
+        rel_pos = position - path_start
+        proj_length = np.dot(rel_pos, path_dir)
+        proj_width = np.linalg.norm(rel_pos - proj_length * path_dir)
+        half_path_width = 0.5 * state['paths_width'][path_id]
+        return (0 <= proj_length) and (proj_length <= path_length) and (proj_width <= half_path_width - 0.5 * ExpertAgent.KART_WIDTH)
+
     def __find_non_crashing_point(self, state: State):
         """Finds a non-crashing point for the kart to aim at.
 
@@ -890,7 +914,6 @@ class ExpertAgent:
         """
         last_path_id = 1
         angle = self.__get_angle_to_next_path(state, current_id=0)
-        last_path_center = (from_polar_to_cartesian(state['paths_start'][last_path_id]) + from_polar_to_cartesian(state['paths_end'][last_path_id])) / 2.0
         # The original while(1) loop is replaced with a for loop to avoid
         # infinite loops (which we had once or twice). Usually the number
         # of iterations in the while loop is less than 7.
@@ -921,16 +944,27 @@ class ExpertAgent:
                 direction /= length
             # Test if we crash if we drive towards the target sector
             for i in range(2, steps):
+                # step_coord = direction * i * ExpertAgent.KART_LENGTH
+                # path_test_id = None
+                # for curr_path_id in range(last_path_id + 1):
+                #     if self.check_if_pos_in_path(state, step_coord, curr_path_id):
+                #         path_test_id = curr_path_id
+                #         break
+                # # If we are outside, the previous node is what we are looking for
+                # if path_test_id is None:
+                #     return last_path_center
                 step_coord = direction * i * ExpertAgent.KART_LENGTH
                 # Get distance to center of track at this position
-                distance = self.get_distance_to_path_center_at(from_polar_to_cartesian(state['paths_start'][last_path_id]),
-                                                               from_polar_to_cartesian(state['paths_end'][last_path_id]),
-                                                               step_coord)
+                distance = self.__get_distance_to_path_center_at(from_polar_to_cartesian(state['paths_start'][last_path_id]),
+                                                                 from_polar_to_cartesian(state['paths_end'][last_path_id]),
+                                                                 step_coord)
                 # If we are outside, the previous node is what we are looking for
                 if distance > 0.5 * state['paths_width'][last_path_id] - 0.5 * ExpertAgent.KART_WIDTH:
                     return last_path_center
             angle = angle1
             last_path_id += 1
+
+        last_path_center = (from_polar_to_cartesian(state['paths_start'][last_path_id]) + from_polar_to_cartesian(state['paths_end'][last_path_id])) / 2.0
         return last_path_center
 
     def __handle_steering(self, state: State, action: Action, kart_ahead_id: Optional[int], dt: float,
@@ -957,7 +991,7 @@ class ExpertAgent:
             #       close behind by slowing/steering slightly
             # If we are close enough and can pass the bomb, try to hit this kart
             if state['karts_distance'][kart_ahead_id] <= 10:  # NOTE: the condition on previous owner was removed for simplicity
-                target_position = state['karts_position'][kart_ahead_id]
+                target_position = from_polar_to_cartesian(state['karts_position'][kart_ahead_id])
                 target_speed = np.linalg.norm(state['karts_velocity'][kart_ahead_id])
                 if target_speed < speed:
                     time_till_hit = state['karts_distance'][kart_ahead_id] / (speed - target_speed)
