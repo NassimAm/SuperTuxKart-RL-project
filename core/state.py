@@ -119,17 +119,19 @@ class State(TypedDict):
     """Current attachement on the kart."""
     attachment_time_left: float
     """Time left for the current attachment."""
-    aux_ticks: float  # TODO: remove this because it's not useful (always 0.0)
+    aux_ticks: float  # NOTE: Remove this because it's not useful (always 0.0)
     """Auxiliary ticks for various purposes."""
     center_path: np.ndarray
     """Center path coordinates."""
     center_path_distance: float
     """Distance to the center path."""
-    distance_down_track: float
+    distance_down_track: float  # TODO: normalized?
     """Distance traveled down the track."""
+    overall_distance_ratio: float
+    """Overall distance ratio in the race."""
     energy: float
     """Current energy level."""
-    front: np.ndarray
+    front: np.ndarray  # NOTE: Removed this because it's not useful (always [0.0, 0.0, 0.7])
     """Front vector coordinates of the kart."""
     items_position: np.ndarray
     """Positions of items on the track."""
@@ -139,7 +141,7 @@ class State(TypedDict):
     """Indicates if the kart is jumping."""
     stuck: bool
     """Indicates if the kart is stuck."""
-    karts_position: np.ndarray
+    karts_position: np.ndarray  # TODO: at least see one ahead if any and one behind if any
     """Positions of other karts."""
     karts_rel_rank: np.ndarray
     """Ranks of other karts relative to the current kart."""
@@ -147,9 +149,11 @@ class State(TypedDict):
     """Velocity of other karts."""
     karts_distance: np.ndarray
     """Track distances to other karts."""
+    karts_attachment: list[Attachment]
+    """Attachments of other karts."""
     max_steer_angle: float
     """Maximum steering angle."""
-    paths_distance: np.ndarray
+    paths_distance: np.ndarray  # TODO: normalized? and remove redundant info
     """Distances from the paths starts and ends (vector of dimension 2)."""
     paths_end: np.ndarray
     """End coordinates of the paths."""
@@ -159,8 +163,8 @@ class State(TypedDict):
     """Widths of the paths."""
     phase: Phase
     """Current phase of the race."""
-    nb_steps_since_set: int
-    """Number of steps since the SET phase began."""
+    should_accelerate_in_start: bool
+    """Indicates if the kart should accelerate in the start phase."""
     powerup: Powerup
     """Current powerup type."""
     shield_time: float
@@ -169,21 +173,27 @@ class State(TypedDict):
     """Skeed factor of the kart."""
     velocity: np.ndarray
     """Velocity vector of the kart."""
+    nitro_duration_time_left: float
+    """Time left for nitro duration effect."""
+    nitro_fadeout_time_left: float
+    """Time left for nitro fadeout effect."""
+    zipper_duration_time_left: float
+    """Time left for zipper duration effect."""
+    zipper_fadeout_time_left: float
+    """Time left for zipper fadeout effect."""
+    skid_direction: int
+    """Direction of the skid: -1 for left, 1 for right, 0 for no skid."""
+    time_since_last_fire: float
+    """Time since the last fire action."""
+    prev_actions: list[Action]
+    """List of previous actions taken."""
     # Expert observations ===========================
     current_lap: int
     """Current lap number."""
     game_time: float
     """Current game time."""
-    nitro_time_left: float
-    """Time left for nitro effect."""
-    zipper_time_left: float
-    """Time left for zipper effect."""
-    skid_direction: int
-    """Direction of the skid: -1 for left, 1 for right, 0 for no skid."""
     time_since_skid_start: float
     """Time since the skid started."""
-    prev_actions: list[Action]
-    """List of previous actions taken."""
 
     CONTINUOUS_KEYS = [
         'rank',
@@ -192,6 +202,7 @@ class State(TypedDict):
         'center_path',
         'center_path_distance',
         'distance_down_track',
+        'overall_distance_ratio',
         'energy',
         'front',
         'items_position',
@@ -213,7 +224,8 @@ class State(TypedDict):
         'nitro_time_left',
         'zipper_time_left',
         'skid_direction',
-        'time_since_skid_start'
+        'time_since_skid_start',
+        'time_since_last_fire'
     ]
 
     DISCRETE_KEYS = [
@@ -223,6 +235,7 @@ class State(TypedDict):
         'phase',
         'powerup',
         'stuck',
+        'karts_attachment',
         'prev_actions'
     ]
 
@@ -237,6 +250,7 @@ class State(TypedDict):
             center_path=state['center_path'],
             center_path_distance=state['center_path_distance'],
             distance_down_track=state['distance_down_track'],
+            overall_distance_ratio=state['overall_distance_ratio'],
             energy=state['energy'],
             front=state['front'],
             items_position=state['items_position'],
@@ -247,23 +261,27 @@ class State(TypedDict):
             karts_rel_rank=state['karts_rel_rank'],
             karts_velocity=state['karts_velocity'],
             karts_distance=state['karts_distance'],
+            karts_attachment=[Attachment(e) for e in state['karts_attachment']],
             max_steer_angle=state['max_steer_angle'],
             paths_distance=state['paths_distance'],
             paths_end=state['paths_end'],
             paths_start=state['paths_start'],
             paths_width=state['paths_width'],
             phase=Phase(state['phase']),
-            nb_steps_since_set=state['nb_steps_since_set'],
+            should_accelerate_in_start=bool(state['should_accelerate_in_start']),
             powerup=Powerup(state['powerup']),
             shield_time=state['shield_time'],
             skeed_factor=state['skeed_factor'],
             velocity=state['velocity'],
             current_lap=state['current_lap'],
             game_time=state['game_time'],
-            nitro_time_left=state['nitro_time_left'],
-            zipper_time_left=state['zipper_time_left'],
+            nitro_duration_time_left=state['nitro_duration_time_left'],
+            nitro_fadeout_time_left=state['nitro_fadeout_time_left'],
+            zipper_duration_time_left=state['zipper_duration_time_left'],
+            zipper_fadeout_time_left=state['zipper_fadeout_time_left'],
             skid_direction=state['skid_direction'],
             time_since_skid_start=state['time_since_skid_start'],
+            time_since_last_fire=state['time_since_last_fire'],
             prev_actions=[Action.from_env(a) for a in state['prev_actions']]
         )
 
@@ -278,6 +296,7 @@ class State(TypedDict):
             'center_path': state['center_path'],
             'center_path_distance': state['center_path_distance'],
             'distance_down_track': state['distance_down_track'],
+            'overall_distance_ratio': state['overall_distance_ratio'],
             'energy': state['energy'],
             'front': state['front'],
             'items_position': state['items_position'],
@@ -288,23 +307,27 @@ class State(TypedDict):
             'karts_rel_rank': state['karts_rel_rank'],
             'karts_velocity': state['karts_velocity'],
             'karts_distance': state['karts_distance'],
+            'karts_attachment': np.array([e.value for e in state['karts_attachment']]),
             'max_steer_angle': state['max_steer_angle'],
             'paths_distance': state['paths_distance'],
             'paths_end': state['paths_end'],
             'paths_start': state['paths_start'],
             'paths_width': state['paths_width'],
             'phase': state['phase'].value,
-            'nb_steps_since_set': state['nb_steps_since_set'],
+            'should_accelerate_in_start': state['should_accelerate_in_start'],
             'powerup': state['powerup'].value,
             'shield_time': state['shield_time'],
             'skeed_factor': state['skeed_factor'],
             'velocity': state['velocity'],
             'current_lap': state['current_lap'],
             'game_time': state['game_time'],
-            'nitro_time_left': state['nitro_time_left'],
-            'zipper_time_left': state['zipper_time_left'],
+            'nitro_duration_time_left': state['nitro_duration_time_left'],
+            'nitro_fadeout_time_left': state['nitro_fadeout_time_left'],
+            'zipper_duration_time_left': state['zipper_duration_time_left'],
+            'zipper_fadeout_time_left': state['zipper_fadeout_time_left'],
             'skid_direction': state['skid_direction'],
             'time_since_skid_start': state['time_since_skid_start'],
+            'time_since_last_fire': state['time_since_last_fire'],
             'prev_actions': [Action.to_env(a) for a in state['prev_actions']]
         }
 
@@ -315,12 +338,11 @@ class State(TypedDict):
             torch.tensor([state['rank']]),
             torch.tensor(state['attachment'].encode()),
             torch.tensor([state['attachment_time_left']]),
-            torch.tensor([state['aux_ticks']]),
             torch.tensor(state['center_path'].reshape(-1)),
             torch.tensor([state['center_path_distance']]),
             torch.tensor([state['distance_down_track']]),
+            torch.tensor([state['overall_distance_ratio']]),
             torch.tensor([state['energy']]),
-            torch.tensor(state['front'].reshape(-1)),
             torch.tensor(state['items_position'].reshape(-1)),
             torch.tensor(np.concatenate([e.encode() for e in state['items_type']])),
             torch.tensor([int(state['jumping'])]),
@@ -329,15 +351,23 @@ class State(TypedDict):
             torch.tensor(state['karts_rel_rank'].reshape(-1)),
             torch.tensor(state['karts_velocity'].reshape(-1)),
             torch.tensor(state['karts_distance'].reshape(-1)),
+            torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']])),
             torch.tensor([state['max_steer_angle']]),
             torch.tensor(state['paths_distance'].reshape(-1)),
             torch.tensor(state['paths_end'].reshape(-1)),
             torch.tensor(state['paths_start'].reshape(-1)),
             torch.tensor(state['paths_width'].reshape(-1)),
             torch.tensor(state['phase'].encode()),
-            torch.tensor([state['nb_steps_since_set']]),
+            torch.tensor([int(state['should_accelerate_in_start'])]),
             torch.tensor(state['powerup'].encode()),
             torch.tensor([state['shield_time']]),
             torch.tensor([state['skeed_factor']]),
-            torch.tensor(state['velocity'].reshape(-1))
+            torch.tensor(state['velocity'].reshape(-1)),
+            torch.tensor([state['nitro_duration_time_left']]),
+            torch.tensor([state['nitro_fadeout_time_left']]),
+            torch.tensor([state['zipper_duration_time_left']]),
+            torch.tensor([state['zipper_fadeout_time_left']]),
+            torch.tensor([state['skid_direction']]),
+            torch.tensor([state['time_since_last_fire']]),
+            torch.cat([Action.to_model(a) for a in state['prev_actions']])
         ])

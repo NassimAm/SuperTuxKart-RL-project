@@ -1,6 +1,6 @@
 from gymnasium import Env, Wrapper, ObservationWrapper
 from gymnasium.spaces import Box, Discrete, Sequence
-from core.state import Phase, Powerup
+from core.state import Phase, Powerup, Attachment
 from core.expert import ExpertAgent
 from core.utils import from_cartesian_to_polar, rotate
 from copy import deepcopy
@@ -70,6 +70,15 @@ class EnhanceObservations(Wrapper):
             shape=(),
             dtype=np.int32,
         )
+        self.observation_space['should_accelerate_in_start'] = Discrete(
+            n=2,
+            dtype=np.int32,
+        )
+        # Update with the new powerup state
+        self.observation_space['powerup'] = Discrete(
+            n=len(Powerup),
+            dtype=env.observation_space['powerup'].dtype,
+        )
         # Save number of steps to track phases
         self.nb_steps = 0
 
@@ -82,13 +91,19 @@ class EnhanceObservations(Wrapper):
         # Phase representation
         if self.nb_steps < Phase.get_ready_phase_limit():
             observation['phase'] = Phase.READY_PHASE.value
-            observation['nb_steps_since_set'] = 0
+            observation['should_accelerate_in_start'] = 0
         elif self.nb_steps < Phase.get_set_phase_limit():
             observation['phase'] = Phase.SET_PHASE.value
-            observation['nb_steps_since_set'] = self.nb_steps - Phase.get_ready_phase_limit()
+            if self.nb_steps >= Phase.get_ready_phase_limit() + 1:  # Delay by one step to increase start boost chances
+                observation['should_accelerate_in_start'] = 1
+            else:
+                observation['should_accelerate_in_start'] = 0
         else:
             observation['phase'] = Phase.RACE_PHASE.value
-            observation['nb_steps_since_set'] = Phase.get_set_phase_limit() - Phase.get_ready_phase_limit()
+            observation['should_accelerate_in_start'] = 1
+        # Powerup representation
+        powerup = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix].powerup.type.value
+        observation['powerup'] = powerup
         return observation
 
     def reset(self, **kwargs):
@@ -140,35 +155,6 @@ class StuckObservationWrapper(ObservationWrapper):
         return observation
 
 
-class FeatureSelectionWrapper(ObservationWrapper):
-    """An observation wrapper that selects specific features from the observation."""
-
-    def __init__(self, env: Env, features_to_remove: list[str]):
-        """An observation wrapper that selects specific features from the observation.
-
-        :param env: The environment to wrap.
-        :param features_to_remove: List of feature names to remove from the observation.
-        """
-        super().__init__(env)
-
-        # Update the observation space to remove specified features
-        self.observation_space = deepcopy(env.observation_space)
-        for feature in features_to_remove:
-            if feature in self.observation_space.spaces:
-                del self.observation_space.spaces[feature]
-
-    def observation(self, observation):
-        """Remove specified features from the observation.
-
-        :param observation: The original observation.
-        :return: The modified observation with specified features removed.
-        """
-        for feature in observation.keys():
-            if feature not in self.observation_space.spaces:
-                del observation[feature]
-        return observation
-
-
 class ExpertObservations(Wrapper):
     """An observation wrapper that adds more detailed observations."""
 
@@ -190,6 +176,13 @@ class ExpertObservations(Wrapper):
             shape=(),
             dtype=np.float32,
         )
+        # Overall distance ratio in the race
+        self.observation_space['overall_distance_ratio'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(),
+            dtype=np.float32,
+        )
         # Current lap number
         self.observation_space['current_lap'] = Box(
             low=0,
@@ -205,16 +198,30 @@ class ExpertObservations(Wrapper):
             dtype=np.float32,
         )
         # Add nitro time left
-        self.nitro_time_left = 0.0
-        self.observation_space['nitro_time_left'] = Box(
+        self.nitro_duration_time_left = 0.0
+        self.observation_space['nitro_duration_time_left'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        self.nitro_fadeout_time_left = 0.0
+        self.observation_space['nitro_fadeout_time_left'] = Box(
             low=0.0,
             high=float('inf'),
             shape=(),
             dtype=np.float32,
         )
         # Add zipper time left
-        self.zipper_time_left = 0.0
-        self.observation_space['zipper_time_left'] = Box(
+        self.zipper_duration_time_left = 0.0
+        self.observation_space['zipper_duration_time_left'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        self.zipper_fadeout_time_left = 0.0
+        self.observation_space['zipper_fadeout_time_left'] = Box(
             low=0.0,
             high=float('inf'),
             shape=(),
@@ -242,6 +249,13 @@ class ExpertObservations(Wrapper):
             shape=(self.state_karts,),
             dtype=np.float32,
         )
+        # Add oppponent karts attachement
+        self.observation_space['karts_attachment'] = Box(
+            low=0,
+            high=len(Attachment)-1,
+            shape=(self.state_karts,),
+            dtype=np.int32
+        )
         # Add skid direction
         self.skid_direction = 0
         self.observation_space['skid_direction'] = Box(
@@ -253,6 +267,14 @@ class ExpertObservations(Wrapper):
         # Add time since skidding started
         self.time_since_skid_start = 0.0
         self.observation_space['time_since_skid_start'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        # Add time since last fire
+        self.time_since_last_fire = 0.0
+        self.observation_space['time_since_last_fire'] = Box(
             low=0.0,
             high=float('inf'),
             shape=(),
@@ -284,6 +306,11 @@ class ExpertObservations(Wrapper):
         normalized_rank = 1.0 - ((rank - 1) / (num_karts - 1))  # 0.0 for last, 1.0 for first and others in between
         # Add normalized kart rank
         observation['rank'] = normalized_rank
+        # Add overall distance ratio
+        overall_distance = kart.overall_distance
+        track_length = self.env.unwrapped.track.length
+        full_distance = self.env.unwrapped.config.laps * track_length
+        observation['overall_distance_ratio'] = overall_distance / full_distance
         # Add current lap
         observation['current_lap'] = kart.finished_laps
         # Add game time
@@ -291,39 +318,61 @@ class ExpertObservations(Wrapper):
         # Add nitro time left
         if did_nitro:
             # If the kart used nitro, reset the nitro time left
-            self.nitro_time_left = ExpertAgent.NITRO_DURATION + ExpertAgent.NITRO_FADE_OUT_TIME
-            observation['nitro_time_left'] = self.nitro_time_left
+            self.nitro_duration_time_left = ExpertAgent.NITRO_DURATION
+            self.nitro_fadeout_time_left = ExpertAgent.NITRO_FADE_OUT_TIME
+            observation['nitro_duration_time_left'] = self.nitro_duration_time_left
+            observation['nitro_fadeout_time_left'] = self.nitro_fadeout_time_left
         else:
             if reset:
                 # If resetting, set nitro time left to 0.0
-                self.nitro_time_left = 0.0
-                observation['nitro_time_left'] = self.nitro_time_left
+                self.nitro_duration_time_left = 0.0
+                self.nitro_fadeout_time_left = 0.0
+                observation['nitro_duration_time_left'] = self.nitro_duration_time_left
+                observation['nitro_fadeout_time_left'] = self.nitro_fadeout_time_left
             else:
-                # Decrease nitro time left
-                new_nitro_time_left = max(0.0, self.nitro_time_left - self.env.unwrapped.config.step_size)
-                self.nitro_time_left = new_nitro_time_left
-                observation['nitro_time_left'] = new_nitro_time_left
+                # Update duration and fadeout times
+                nitro_time_left = self.nitro_duration_time_left + self.nitro_fadeout_time_left
+                nitro_time_left = max(0.0, nitro_time_left - self.env.unwrapped.config.step_size)
+                if nitro_time_left <= ExpertAgent.NITRO_FADE_OUT_TIME:
+                    self.nitro_duration_time_left = 0.0
+                    self.nitro_fadeout_time_left = nitro_time_left
+                else:
+                    self.nitro_duration_time_left = nitro_time_left - ExpertAgent.NITRO_FADE_OUT_TIME
+                    self.nitro_fadeout_time_left = ExpertAgent.NITRO_FADE_OUT_TIME
+                observation['nitro_duration_time_left'] = self.nitro_duration_time_left
+                observation['nitro_fadeout_time_left'] = self.nitro_fadeout_time_left
         # Add zipper time left
         if did_zipper:
             # If the kart used zipper, reset the zipper time left
-            self.zipper_time_left = ExpertAgent.ZIPPER_DURATION + ExpertAgent.ZIPPER_FADE_OUT_TIME
-            observation['zipper_time_left'] = self.zipper_time_left
+            self.zipper_duration_time_left = ExpertAgent.ZIPPER_DURATION
+            self.zipper_fadeout_time_left = ExpertAgent.ZIPPER_FADE_OUT_TIME
+            observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+            observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
         else:
             if reset:
                 # If resetting, set zipper time left to 0.0
-                self.zipper_time_left = 0.0
-                observation['zipper_time_left'] = self.zipper_time_left
+                self.zipper_duration_time_left = 0.0
+                self.zipper_fadeout_time_left = 0.0
+                observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+                observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
             else:
                 # Decrease zipper time left
-                new_zipper_time_left = max(0.0, self.zipper_time_left - self.env.unwrapped.config.step_size)
-                self.zipper_time_left = new_zipper_time_left
-                observation['zipper_time_left'] = new_zipper_time_left
+                zipper_time_left = self.zipper_duration_time_left + self.zipper_fadeout_time_left
+                zipper_time_left = max(0.0, zipper_time_left - self.env.unwrapped.config.step_size)
+                if zipper_time_left <= ExpertAgent.ZIPPER_FADE_OUT_TIME:
+                    self.zipper_duration_time_left = 0.0
+                    self.zipper_fadeout_time_left = zipper_time_left
+                else:
+                    self.zipper_duration_time_left = zipper_time_left - ExpertAgent.ZIPPER_FADE_OUT_TIME
+                    self.zipper_fadeout_time_left = ExpertAgent.ZIPPER_FADE_OUT_TIME
+                observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+                observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
         # Change kart positions, add opponent karts relative rank and velocity, all sorted by track distance difference
         kart_positions = []
         karts_rel_rank = []
         karts_velocity = []
         karts_track_diff = []
-        overall_distance = kart.overall_distance
+        karts_attachment = []
         for kart_ix, other_kart in enumerate(self.env.unwrapped.world.karts):
             if kart_ix == self.env.unwrapped.kart_ix:
                 continue  # Skip self
@@ -343,39 +392,55 @@ class ExpertObservations(Wrapper):
             # Track distance difference
             track_diff = abs(other_kart.overall_distance - overall_distance)
             karts_track_diff.append(track_diff)
+            # Attachment
+            attachment = other_kart.attachment.type.value
+            karts_attachment.append(attachment)
         # Convert to numpy arrays
         kart_positions = np.array(kart_positions)
         karts_rel_rank = np.array(karts_rel_rank)
         karts_velocity = np.array(karts_velocity)
         karts_track_diff = np.array(karts_track_diff)
+        karts_attachment = np.array(karts_attachment)
         # Sort all by track distance difference
         sorted_indices = np.argsort(karts_track_diff)
         kart_positions = kart_positions[sorted_indices]
         karts_rel_rank = karts_rel_rank[sorted_indices]
         karts_velocity = karts_velocity[sorted_indices]
         karts_track_diff = karts_track_diff[sorted_indices]
+        karts_attachment = karts_attachment[sorted_indices]
         # Set in observation
         observation['karts_position'] = kart_positions[:self.state_karts]
         observation['karts_rel_rank'] = karts_rel_rank[:self.state_karts]
         observation['karts_velocity'] = karts_velocity[:self.state_karts]
         observation['karts_distance'] = karts_track_diff[:self.state_karts]
-        # Add skid direction
+        observation['karts_attachment'] = karts_attachment[:self.state_karts]
+        # Add skid direction and time since last fire
         if reset or (action is None):
             self.skid_direction = 0
             self.time_since_skid_start = 0.0
+            self.time_since_last_fire = 0.0
         elif action is not None:
+            # Drifting logic
             if not action['drift']:
                 self.skid_direction = 0
                 self.time_since_skid_start = 0.0
             else:
-                last_action = self.prev_actions[-1]
-                speed = np.linalg.norm(observation['velocity'])
-                if (not last_action['drift']) and (speed > ExpertAgent.SKID_MIN_SPEED):
-                    self.skid_direction = -1 if action['steer'] < 0 else 1
-                if self.skid_direction != 0:
-                    self.time_since_skid_start += self.env.unwrapped.config.step_size
+                if len(self.prev_actions) > 0:
+                    last_action = self.prev_actions[-1]
+                    speed = np.linalg.norm(observation['velocity'])
+                    if (not last_action['drift']) and (speed > ExpertAgent.SKID_MIN_SPEED):
+                        self.skid_direction = -1 if action['steer'] < 0 else 1
+                    if self.skid_direction != 0:
+                        self.time_since_skid_start += self.env.unwrapped.config.step_size
+            # Firing logic
+            if action['fire']:
+                self.time_since_last_fire = 0.0
+            else:
+                self.time_since_last_fire += self.env.unwrapped.config.step_size
+        # Set in observation
         observation['skid_direction'] = self.skid_direction
         observation['time_since_skid_start'] = self.time_since_skid_start
+        observation['time_since_last_fire'] = self.time_since_last_fire
         # Add previous actions
         if reset:
             self.prev_actions = []
@@ -390,8 +455,6 @@ class ExpertObservations(Wrapper):
 
     def reset(self, **kwargs):
         """Reset the environment and add expert observations."""
-        self.nitro_time_left = 0.0
-        self.zipper_time_left = 0.0
         obs, info = self.env.reset(**kwargs)
         new_obs = self.get_new_observation(obs, action=None, did_nitro=False, did_zipper=False, reset=True)
         return new_obs, info
@@ -400,8 +463,8 @@ class ExpertObservations(Wrapper):
         """Step the environment and add expert observations."""
         kart = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix]
         did_nitro = action['nitro']
-        # TODO: Improve detection of zipper usage
-        did_zipper = (kart.powerup == Powerup.ZIPPER) and action['fire']
+        # TODO: Improve detection of zipper usage if possible
+        did_zipper = (kart.powerup.type.value == Powerup.ZIPPER.value) and action['fire']
         obs, reward, terminated, truncated, info = self.env.step(action)
         new_obs = self.get_new_observation(obs, action=action, did_nitro=did_nitro, did_zipper=did_zipper, reset=False)
         return new_obs, reward, terminated, truncated, info
@@ -413,29 +476,3 @@ class ExpertObservations(Wrapper):
         """
         kart = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix]
         return rotate(x - kart.location, kart.rotation)
-
-# class EnableFireBackwardsWrapper(ActionWrapper):
-#     """An action wrapper that enables firing backwards."""
-
-#     def __init__(self, env: Env):
-#         """An action wrapper that enables firing backwards.
-
-#         :param env: The environment to wrap.
-#         """
-#         super().__init__(env)
-#         # Update the action space to include the look_back action
-#         self.action_space = deepcopy(env.action_space)
-#         self.action_space['fire'] = Discrete(
-#             n=3,  # 0: no fire, 1: fire forwards, 2: fire backwards
-#             dtype=env.action_space['fire'].dtype
-#         )
-
-#     def action(self, action):
-#         """Convert the action to the environment's expected format.
-
-#         :param action: The action to convert.
-#         :return: The converted action.
-#         """
-#         env_action = deepcopy(action)
-
-#         return env_action

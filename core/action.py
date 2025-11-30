@@ -54,13 +54,13 @@ class Action(TypedDict):
     def to_model(action: 'Action') -> list[torch.Tensor]:
         """Convert the action to the model's expected format."""
         return torch.cat([
-            torch.tensor([action['acceleration']], dtype=torch.float32),
-            torch.tensor([float(action['brake'])], dtype=torch.float32),
-            torch.tensor([float(action['drift'])], dtype=torch.float32),
-            torch.tensor([float(action['fire'])], dtype=torch.float32),
-            torch.tensor([float(action['nitro'])], dtype=torch.float32),
-            torch.tensor([float(action['rescue'])], dtype=torch.float32),
-            torch.tensor([action['steer']], dtype=torch.float32),
+            torch.tensor([action['acceleration']]),
+            torch.tensor([float(action['brake'])]),
+            torch.tensor([float(action['drift'])]),
+            torch.tensor([float(action['fire'])]),
+            torch.tensor([float(action['nitro'])]),
+            torch.tensor([float(action['rescue'])]),
+            torch.tensor([action['steer']]),
         ])
 
     def get_dims() -> list[int]:
