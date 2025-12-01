@@ -14,7 +14,7 @@ import argparse
 
 def collect_trajectories(data_path: str, difficulty: int = 3):
     """"""
-    env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=True), difficulty=difficulty, num_kart=10, laps=3)
+    env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=True), difficulty=difficulty, num_kart=10)
     previous_action_horizon = 1
     wrappers = [
         lambda env: ConstantSizedObservations(env, state_paths=10),

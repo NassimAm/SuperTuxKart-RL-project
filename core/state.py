@@ -341,7 +341,7 @@ class State(TypedDict):
             torch.tensor(state['center_path'].reshape(-1), dtype=torch.float32),
             torch.tensor([state['center_path_distance']], dtype=torch.float32),
             torch.tensor([state['distance_down_track']], dtype=torch.float32),
-            torch.tensor([state['overall_distance_ratio']], dtype=torch.float32),
+            # torch.tensor([state['overall_distance_ratio']], dtype=torch.float32),
             torch.tensor([state['energy']], dtype=torch.float32),
             torch.tensor(state['items_position'].reshape(-1), dtype=torch.float32),
             torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
