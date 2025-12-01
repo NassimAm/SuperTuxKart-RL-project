@@ -65,6 +65,19 @@ class Action(TypedDict):
             'steer': np.array(action['steer'])
         }
 
+    def from_model(model_output: torch.Tensor) -> 'Action':
+        """Create an Action from the model's output tensor."""
+        return Action(
+            acceleration=model_output[0].item(),
+            brake=(model_output[1].item() >= 0.5),
+            drift=(model_output[2].item() >= 0.5),
+            fire=(model_output[3].item() >= 0.5),
+            nitro=(model_output[4].item() >= 0.5),
+            rescue=(model_output[5].item() >= 0.5),
+            steer=model_output[6].item(),
+            look_back=False
+        )
+
     def to_model(action: 'Action') -> torch.Tensor:
         """Convert the action to the model's expected format."""
         return torch.cat([
