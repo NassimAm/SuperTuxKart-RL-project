@@ -39,6 +39,19 @@ class Action(TypedDict):
             look_back=False
         )
 
+    def empty() -> 'Action':
+        """Create an empty Action with all components set to their default values."""
+        return Action(
+            acceleration=0.0,
+            brake=False,
+            drift=False,
+            fire=False,
+            nitro=False,
+            rescue=False,
+            steer=0.0,
+            look_back=False
+        )
+
     def to_env(action: 'Action') -> np.ndarray:
         """Convert the action to the environment's expected format."""
         return {

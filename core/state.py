@@ -245,13 +245,13 @@ class State(TypedDict):
         return State(
             rank=state['rank'],
             attachment=Attachment(state['attachment']),
-            attachment_time_left=state['attachment_time_left'],
-            aux_ticks=state['aux_ticks'],
+            attachment_time_left=state['attachment_time_left'].item(),
+            aux_ticks=state['aux_ticks'].item(),
             center_path=state['center_path'],
-            center_path_distance=state['center_path_distance'],
-            distance_down_track=state['distance_down_track'],
+            center_path_distance=state['center_path_distance'].item(),
+            distance_down_track=state['distance_down_track'].item(),
             overall_distance_ratio=state['overall_distance_ratio'],
-            energy=state['energy'],
+            energy=state['energy'].item(),
             front=state['front'],
             items_position=state['items_position'],
             items_type=[ItemType(e) for e in state['items_type']],
@@ -262,16 +262,16 @@ class State(TypedDict):
             karts_velocity=state['karts_velocity'],
             karts_distance=state['karts_distance'],
             karts_attachment=[Attachment(e) for e in state['karts_attachment']],
-            max_steer_angle=state['max_steer_angle'],
+            max_steer_angle=state['max_steer_angle'].item(),
             paths_distance=state['paths_distance'],
             paths_end=state['paths_end'],
             paths_start=state['paths_start'],
-            paths_width=state['paths_width'],
+            paths_width=state['paths_width'].reshape(-1),
             phase=Phase(state['phase']),
             should_accelerate_in_start=bool(state['should_accelerate_in_start']),
             powerup=Powerup(state['powerup']),
-            shield_time=state['shield_time'],
-            skeed_factor=state['skeed_factor'],
+            shield_time=state['shield_time'].item(),
+            skeed_factor=state['skeed_factor'].item(),
             velocity=state['velocity'],
             current_lap=state['current_lap'],
             game_time=state['game_time'],
@@ -331,7 +331,7 @@ class State(TypedDict):
             'prev_actions': [Action.to_env(a) for a in state['prev_actions']]
         }
 
-    def to_model(state: 'State') -> torch.Tensor:
+    def to_model(state: 'State', previous_action_horizon: int = 1) -> torch.Tensor:
         """Convert the state to the model's expected format."""
 
         return torch.concat([
@@ -369,5 +369,5 @@ class State(TypedDict):
             torch.tensor([state['zipper_fadeout_time_left']]),
             torch.tensor([state['skid_direction']]),
             torch.tensor([state['time_since_last_fire']]),
-            torch.cat([Action.to_model(a) for a in state['prev_actions']])
+            torch.cat([Action.to_model(a) for a in state['prev_actions'][:previous_action_horizon]] if len(state['prev_actions']) > 0 else [Action.to_model(Action.empty()) for _ in range(previous_action_horizon)])
         ])
