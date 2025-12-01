@@ -23,19 +23,20 @@ class Action(TypedDict):
     look_back: bool = False  # TODO: see how to integrate this in the action space
     """Look back component of the action."""
 
+    NAMES = ['acceleration', 'brake', 'drift', 'fire', 'nitro', 'rescue', 'steer']
     CONTINUOUS_ACTIONS = ['acceleration', 'steer']
     DISCRETE_ACTIOSNS = ['brake', 'drift', 'fire', 'nitro', 'rescue']
 
-    def from_env(input_action: dict[str, np.ndarray]) -> 'Action':
+    def from_env(input_action: dict) -> 'Action':
         """Create an Action from a list representation."""
         return Action(
-            acceleration=input_action['acceleration'],
+            acceleration=input_action['acceleration'].item(),
             brake=bool(input_action['brake']),
             drift=bool(input_action['drift']),
             fire=bool(input_action['fire']),
             nitro=bool(input_action['nitro']),
             rescue=bool(input_action['rescue']),
-            steer=input_action['steer'],
+            steer=input_action['steer'].item(),
             look_back=False
         )
 
@@ -55,37 +56,37 @@ class Action(TypedDict):
     def to_env(action: 'Action') -> np.ndarray:
         """Convert the action to the environment's expected format."""
         return {
-            'acceleration': action['acceleration'],
+            'acceleration': np.array(action['acceleration']),
             'brake': int(action['brake']),
             'drift': int(action['drift']),
             'fire': int(action['fire']),
             'nitro': int(action['nitro']),
             'rescue': int(action['rescue']),
-            'steer': action['steer']
+            'steer': np.array(action['steer'])
         }
 
-    def to_model(action: 'Action') -> list[torch.Tensor]:
+    def to_model(action: 'Action') -> torch.Tensor:
         """Convert the action to the model's expected format."""
         return torch.cat([
-            torch.tensor([action['acceleration']]),
-            torch.tensor([float(action['brake'])]),
-            torch.tensor([float(action['drift'])]),
-            torch.tensor([float(action['fire'])]),
-            torch.tensor([float(action['nitro'])]),
-            torch.tensor([float(action['rescue'])]),
-            torch.tensor([action['steer']]),
+            torch.tensor([action['acceleration']], dtype=torch.float32),
+            torch.tensor([float(action['brake'])], dtype=torch.float32),
+            torch.tensor([float(action['drift'])], dtype=torch.float32),
+            torch.tensor([float(action['fire'])], dtype=torch.float32),
+            torch.tensor([float(action['nitro'])], dtype=torch.float32),
+            torch.tensor([float(action['rescue'])], dtype=torch.float32),
+            torch.tensor([action['steer']], dtype=torch.float32),
         ])
 
-    def get_dims() -> list[int]:
+    def get_types() -> list[str]:
         """Get the dimensions of each action component."""
         return [
-            1,  # acceleration
-            1,  # brake
-            1,  # drift
-            1,  # fire
-            1,  # nitro
-            1,  # rescue
-            1,  # steer
+            'continuous-sigmoid',  # acceleration
+            'discrete',  # brake
+            'discrete',  # drift
+            'discrete',  # fire
+            'discrete',  # nitro
+            'discrete',  # rescue
+            'continuous-tanh',  # steer
         ]
 
     def acceleration_to_continuous(acceleration_discrete: int, acceleration_steps: int = 5) -> float:

@@ -69,6 +69,7 @@ class ExpertAgent:
     # ============================== Personal Assumptions ==============================
     # NOTE: These values are personal assumptions made to simplify the implementation
     MIN_DISTANCE_TO_AVOID_ITEM = 1.0  # meters
+    MAX_TIME_SINCE_LAST_FIRE = 10.0  # seconds
 
     def __init__(self, enable_drift: bool = True):
         """Initializes the ExpertAgent.
@@ -153,7 +154,7 @@ class ExpertAgent:
         # Compute the required steer to reach the target point
         steer_angle = self.__steer_to_point(state, target_position)
         # Calculate the steer fraction
-        steer_fraction = steer_angle / state['max_steer_angle'].item()
+        steer_fraction = steer_angle / state['max_steer_angle']
         # If drifting is enabled, determine if we can drift
         if self.enable_drift:
             can_drift = self.__can_drift(state, steer_fraction, track_direction, last_path_id, curve_center, curve_radius)

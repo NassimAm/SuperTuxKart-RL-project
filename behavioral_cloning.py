@@ -29,11 +29,10 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
 
     # Load data (npz file)
     data_file = np.load(data_path)
-    states_continuous = data_file['states_continuous']
-    states_discrete = data_file['states_discrete']
+    states = data_file['states']
     actions = data_file['actions']
-    rewards = data_file['rewards']
-    terminated = data_file['terminated']
+    # rewards = data_file['rewards']
+    # terminated = data_file['terminated']
 
     # Setup neptune for logging if enabled
     if logging:
@@ -62,7 +61,7 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
     print(f"Using device: {device}")
 
     # Create dataset
-    dataset = TrajectoryDataset(states_continuous, states_discrete, actions, rewards, terminated, cfg=cfg)
+    dataset = TrajectoryDataset(states, actions)
 
     # Split into train and test sets
     train_dataset, test_dataset = dataset.train_test_split(test_ratio=test_ratio)
@@ -71,62 +70,84 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
 
     # Create model
     state_dim = dataset.get_state_dim()
-    action_dims = dataset.get_action_dims()
-    model = ActorMLP(input_dim=state_dim, hidden_dim=cfg["hidden_dim"], output_dims=action_dims).to(device)
+    model = ActorMLP(input_dim=state_dim, hidden_dim=cfg["hidden_dim"]).to(device)
 
-    # Training loop (omitted for brevity)
+    # Training loop
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = torch.nn.CrossEntropyLoss()
+    mse_fn = torch.nn.MSELoss()
+    bce_fn = torch.nn.BCELoss()
+    action_types = Action.get_types()
 
     tqdm_bar = tqdm(range(nb_epochs), desc=f"Epoch 0/{nb_epochs}")
     for epoch in tqdm_bar:
         # Training step
         model.train()
-        train_accuracies = []
-        for states_batch, actions_batch, _ in train_loader:
+        train_losses = []
+        for states_batch, actions_batch in train_loader:
             states_batch = states_batch.to(device)
             actions_batch = actions_batch.to(device)
 
             optimizer.zero_grad()
-            action_logits = model(states_batch)
+            pred_actions = model(states_batch)
 
-            loss = 0.0
-            for i, (logits, name) in enumerate(zip(action_logits, Action.NAMES)):
-                action_loss = loss_fn(logits, actions_batch[:, i])
-                loss += action_loss
-                acc = (logits.argmax(dim=1) == actions_batch[:, i]).float().mean()
-                train_accuracies.append(acc.item())
-                if logging:
-                    neptune_run[f'train/{name}_accuracy'].append(acc.item())
-                    neptune_run[f'train/{name}_loss'].append(action_loss.item())
+            train_loss = 0.0
+            for i, (name, action_type, pred_action) in enumerate(zip(Action.NAMES, action_types, pred_actions)):
+                # Compute loss and accuracy for each action dimension according to its type
+                if action_type == 'discrete':
+                    action_loss = bce_fn(pred_action, actions_batch[:, i])
+                    acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
+                    if logging:
+                        neptune_run[f'train/{name}_accuracy'].append(acc.item())
+                        neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                else:
+                    action_loss = mse_fn(pred_action, actions_batch[:, i])
+                    if logging:
+                        neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                # Accumulate loss
+                train_loss += action_loss
+            # Save and log total loss
+            train_losses.append(train_loss.item())
             if logging:
-                neptune_run['train/total_loss'].append(loss.item())
-            loss.backward()
+                neptune_run['train/total_loss'].append(train_loss.item())
+            # Backpropagation
+            train_loss.backward()
             optimizer.step()
 
         # Evaluation step
         model.eval()
-        test_accuracies = []
+        test_losses = []
         with torch.no_grad():
-            for states_batch, actions_batch, _ in test_loader:
+            for states_batch, actions_batch in test_loader:
                 states_batch = states_batch.to(device)
                 actions_batch = actions_batch.to(device)
 
-                action_logits = model(states_batch)
+                pred_actions = model(states_batch)
 
-                for i, (logits, name) in enumerate(zip(action_logits, Action.NAMES)):
-                    action_loss = loss_fn(logits, actions_batch[:, i])
-                    acc = (logits.argmax(dim=1) == actions_batch[:, i]).float().mean()
-                    test_accuracies.append(acc.item())
-                    if logging:
-                        neptune_run[f'test/{name}_accuracy'].append(acc.item())
-                        neptune_run[f'test/{name}_loss'].append(action_loss.item())
+                test_loss = 0.0
+                for i, (name, action_type, pred_action) in enumerate(zip(Action.NAMES, action_types, pred_actions)):
+                    # Compute loss and accuracy for each action dimension according to its type
+                    if action_type == 'discrete':
+                        action_loss = bce_fn(pred_action, actions_batch[:, i])
+                        acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
+                        if logging:
+                            neptune_run[f'test/{name}_accuracy'].append(acc.item())
+                            neptune_run[f'test/{name}_loss'].append(action_loss.item())
+                    else:
+                        action_loss = mse_fn(pred_action, actions_batch[:, i])
+                        if logging:
+                            neptune_run[f'test/{name}_loss'].append(action_loss.item())
+                    # Accumulate loss
+                    test_loss += action_loss
+                # Save and log total loss
+                test_losses.append(test_loss.item())
+                if logging:
+                    neptune_run['test/total_loss'].append(test_loss.item())
 
         # Save model
         torch.save(model.state_dict(), model_path)
 
         # Update progress bar description
-        tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Acc: {np.mean(train_accuracies).item():.2f} - Test Acc: {np.mean(test_accuracies).item():.2f}")
+        tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Loss: {np.mean(train_losses).item():.2f} - Test Loss: {np.mean(test_losses).item():.2f}")
 
     # Stop neptune run
     if logging:

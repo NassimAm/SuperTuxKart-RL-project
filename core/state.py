@@ -125,7 +125,7 @@ class State(TypedDict):
     """Center path coordinates."""
     center_path_distance: float
     """Distance to the center path."""
-    distance_down_track: float  # TODO: normalized?
+    distance_down_track: float
     """Distance traveled down the track."""
     overall_distance_ratio: float
     """Overall distance ratio in the race."""
@@ -142,19 +142,19 @@ class State(TypedDict):
     stuck: bool
     """Indicates if the kart is stuck."""
     karts_position: np.ndarray  # TODO: at least see one ahead if any and one behind if any
-    """Positions of other karts."""
+    """Positions of other karts."""  # TODO: figure out how to normalize positions (maybe clip the 3rd polar coordinate)
     karts_rel_rank: np.ndarray
     """Ranks of other karts relative to the current kart."""
     karts_velocity: np.ndarray
     """Velocity of other karts."""
-    karts_distance: np.ndarray
+    karts_distance: np.ndarray  # TODO: figure out how to normalize distances (maybe clip to a max distance)
     """Track distances to other karts."""
     karts_attachment: list[Attachment]
     """Attachments of other karts."""
     max_steer_angle: float
     """Maximum steering angle."""
-    paths_distance: np.ndarray  # TODO: normalized? and remove redundant info
-    """Distances from the paths starts and ends (vector of dimension 2)."""
+    paths_distance: np.ndarray
+    """Distances from race start to end of paths."""
     paths_end: np.ndarray
     """End coordinates of the paths."""
     paths_start: np.ndarray
@@ -249,7 +249,7 @@ class State(TypedDict):
             aux_ticks=state['aux_ticks'].item(),
             center_path=state['center_path'],
             center_path_distance=state['center_path_distance'].item(),
-            distance_down_track=state['distance_down_track'].item(),
+            distance_down_track=state['distance_down_track'],
             overall_distance_ratio=state['overall_distance_ratio'],
             energy=state['energy'].item(),
             front=state['front'],
@@ -335,39 +335,39 @@ class State(TypedDict):
         """Convert the state to the model's expected format."""
 
         return torch.concat([
-            torch.tensor([state['rank']]),
-            torch.tensor(state['attachment'].encode()),
-            torch.tensor([state['attachment_time_left']]),
-            torch.tensor(state['center_path'].reshape(-1)),
-            torch.tensor([state['center_path_distance']]),
-            torch.tensor([state['distance_down_track']]),
-            torch.tensor([state['overall_distance_ratio']]),
-            torch.tensor([state['energy']]),
-            torch.tensor(state['items_position'].reshape(-1)),
-            torch.tensor(np.concatenate([e.encode() for e in state['items_type']])),
-            torch.tensor([int(state['jumping'])]),
-            torch.tensor([int(state['stuck'])]),
-            torch.tensor(state['karts_position'].reshape(-1)),
-            torch.tensor(state['karts_rel_rank'].reshape(-1)),
-            torch.tensor(state['karts_velocity'].reshape(-1)),
-            torch.tensor(state['karts_distance'].reshape(-1)),
-            torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']])),
-            torch.tensor([state['max_steer_angle']]),
-            torch.tensor(state['paths_distance'].reshape(-1)),
-            torch.tensor(state['paths_end'].reshape(-1)),
-            torch.tensor(state['paths_start'].reshape(-1)),
-            torch.tensor(state['paths_width'].reshape(-1)),
-            torch.tensor(state['phase'].encode()),
-            torch.tensor([int(state['should_accelerate_in_start'])]),
-            torch.tensor(state['powerup'].encode()),
-            torch.tensor([state['shield_time']]),
-            torch.tensor([state['skeed_factor']]),
-            torch.tensor(state['velocity'].reshape(-1)),
-            torch.tensor([state['nitro_duration_time_left']]),
-            torch.tensor([state['nitro_fadeout_time_left']]),
-            torch.tensor([state['zipper_duration_time_left']]),
-            torch.tensor([state['zipper_fadeout_time_left']]),
-            torch.tensor([state['skid_direction']]),
-            torch.tensor([state['time_since_last_fire']]),
+            torch.tensor([state['rank']], dtype=torch.float32),
+            torch.tensor(state['attachment'].encode(), dtype=torch.float32),
+            torch.tensor([state['attachment_time_left']], dtype=torch.float32),
+            torch.tensor(state['center_path'].reshape(-1), dtype=torch.float32),
+            torch.tensor([state['center_path_distance']], dtype=torch.float32),
+            torch.tensor([state['distance_down_track']], dtype=torch.float32),
+            torch.tensor([state['overall_distance_ratio']], dtype=torch.float32),
+            torch.tensor([state['energy']], dtype=torch.float32),
+            torch.tensor(state['items_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
+            torch.tensor([int(state['jumping'])], dtype=torch.float32),
+            torch.tensor([int(state['stuck'])], dtype=torch.float32),
+            torch.tensor(state['karts_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['karts_distance'].reshape(-1), dtype=torch.float32),
+            torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
+            torch.tensor([state['max_steer_angle']], dtype=torch.float32),
+            torch.tensor(state['paths_distance'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['paths_end'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['paths_start'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['paths_width'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['phase'].encode(), dtype=torch.float32),
+            torch.tensor([int(state['should_accelerate_in_start'])], dtype=torch.float32),
+            torch.tensor(state['powerup'].encode(), dtype=torch.float32),
+            torch.tensor([state['shield_time']], dtype=torch.float32),
+            torch.tensor([state['skeed_factor']], dtype=torch.float32),
+            torch.tensor(state['velocity'].reshape(-1), dtype=torch.float32),
+            torch.tensor([state['nitro_duration_time_left']], dtype=torch.float32),
+            torch.tensor([state['nitro_fadeout_time_left']], dtype=torch.float32),
+            torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
+            torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
+            torch.tensor([state['skid_direction']], dtype=torch.float32),
+            torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
             torch.cat([Action.to_model(a) for a in state['prev_actions'][:previous_action_horizon]] if len(state['prev_actions']) > 0 else [Action.to_model(Action.empty()) for _ in range(previous_action_horizon)])
         ])

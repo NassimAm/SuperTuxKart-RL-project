@@ -176,6 +176,13 @@ class ExpertObservations(Wrapper):
             shape=(),
             dtype=np.float32,
         )
+        # Distance traveled down the track
+        self.observation_space['distance_down_track'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(),
+            dtype=np.float32,
+        )
         # Overall distance ratio in the race
         self.observation_space['overall_distance_ratio'] = Box(
             low=0.0,
@@ -225,6 +232,13 @@ class ExpertObservations(Wrapper):
             low=0.0,
             high=float('inf'),
             shape=(),
+            dtype=np.float32,
+        )
+        # Path distances
+        self.observation_space['paths_distance'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(self.env.observation_space['paths_start'].shape[0],),
             dtype=np.float32,
         )
         # Add opponent kart relative rank
@@ -307,10 +321,12 @@ class ExpertObservations(Wrapper):
         # Add normalized kart rank
         observation['rank'] = normalized_rank
         # Add overall distance ratio
-        overall_distance = kart.overall_distance
+        overall_distance = max(0.0, kart.overall_distance)
         track_length = self.env.unwrapped.track.length
         full_distance = self.env.unwrapped.config.laps * track_length
-        observation['overall_distance_ratio'] = overall_distance / full_distance
+        observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
+        observation['distance_down_track'] = max(0.0, min(kart.distance_down_track / track_length, 1.0))
+        observation['overall_distance_ratio'] = max(0.0, min(overall_distance / full_distance, 1.0))
         # Add current lap
         observation['current_lap'] = kart.finished_laps
         # Add game time
@@ -387,10 +403,11 @@ class ExpertObservations(Wrapper):
             rel_rank = normalized_other_rank - normalized_rank
             karts_rel_rank.append(rel_rank)
             # Velocity (3D vector)
-            velocity = self.__kartview(other_kart.velocity)
+            velocity = self.__kartview(other_kart.velocity, make_relative_to_kart=False)
             karts_velocity.append(velocity)
             # Track distance difference
-            track_diff = abs(other_kart.overall_distance - overall_distance)
+            other_kart_overall_distance = max(0.0, other_kart.overall_distance)
+            track_diff = abs(other_kart_overall_distance - overall_distance)
             karts_track_diff.append(track_diff)
             # Attachment
             attachment = other_kart.attachment.type.value
@@ -437,6 +454,7 @@ class ExpertObservations(Wrapper):
                 self.time_since_last_fire = 0.0
             else:
                 self.time_since_last_fire += self.env.unwrapped.config.step_size
+                self.time_since_last_fire = min(self.time_since_last_fire, ExpertAgent.MAX_TIME_SINCE_LAST_FIRE)
         # Set in observation
         observation['skid_direction'] = self.skid_direction
         observation['time_since_skid_start'] = self.time_since_skid_start
@@ -469,10 +487,15 @@ class ExpertObservations(Wrapper):
         new_obs = self.get_new_observation(obs, action=action, did_nitro=did_nitro, did_zipper=did_zipper, reset=False)
         return new_obs, reward, terminated, truncated, info
 
-    def __kartview(self, x):
+    def __kartview(self, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation: bool = True):
         """Returns a vector in the kart frame
 
         X right, Y up, Z forwards
         """
         kart = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix]
-        return rotate(x - kart.location, kart.rotation)
+        x_proj = x
+        if make_relative_to_kart:
+            x_proj = x - kart.location
+        if adapt_to_kart_rotation:
+            x_proj = rotate(x_proj, kart.rotation)
+        return x_proj
