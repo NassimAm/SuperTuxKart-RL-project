@@ -23,7 +23,7 @@ class ExpertAgent:
     """Whether to enable drifting behavior."""
 
     # ============================== Path characteristics ==============================
-    MAX_STRAIGHT_ANGLE = 0.3  # radians
+    MAX_STRAIGHT_ANGLE = 0.1  # radians
     # ============================== Kart characteristics ==============================
     # NOTE: These values assume that we always have the same type of kart (the default penguin kart)
     # see https://github.com/bpiwowar/pystk2/blob/f86f21efbf137c95c26f85d113dd1525a8fc4ea6/data/kart_characteristics.xml for more details
@@ -150,7 +150,7 @@ class ExpertAgent:
             curve_radius (Optional[float]): The radius of the turn.
         """
         # Set the center of the next path segment as a default target point
-        target_position = (from_polar_to_cartesian(state['paths_start'][1]) + from_polar_to_cartesian(state['paths_end'][1])) / 2.0
+        target_position = (from_polar_to_cartesian(state['paths_start'][2]) + from_polar_to_cartesian(state['paths_end'][2])) / 2.0
         # Compute the required steer to reach the target point
         steer_angle = self.__steer_to_point(state, target_position)
         # Calculate the steer fraction
@@ -210,20 +210,21 @@ class ExpertAgent:
         if abs(velocity_to_next_angle) > 0.3 * np.pi:
             return DirectionType.DIR_UNDEFINED, None
         # Determine if the track is going left, right or straight
-        # Get the first angle (between next path direction and its center direction to the path next to it)
+        # Get the first angle (between direction to next path and its center direction to the path next to it)
         # TODO: debug why this isn't working as expected
         current_path_center = next_path_center
         next_path_center = (from_polar_to_cartesian(state['paths_start'][2]) + from_polar_to_cartesian(state['paths_end'][2])) / 2.0
-        v1 = from_polar_to_cartesian(state['paths_end'][1]) - from_polar_to_cartesian(state['paths_start'][1])
+        v1 = current_path_center
         v2 = next_path_center - current_path_center
         angle1 = get_xz_angle_between(v1, v2)
         # Get second angle (between path center direction and the next path center direction)
         current_path_center = next_path_center
         next_path_center = (from_polar_to_cartesian(state['paths_start'][3]) + from_polar_to_cartesian(state['paths_end'][3])) / 2.0
-        v1 = from_polar_to_cartesian(state['paths_end'][2]) - from_polar_to_cartesian(state['paths_start'][2])
+        v1 = v2
         v2 = next_path_center - current_path_center
         angle2 = get_xz_angle_between(v1, v2)
         rel_angle = angle1 + angle2
+        print("Initial relative angle:", rel_angle)
         # If the relative angle is small enough, consider it straight
         if abs(rel_angle) < ExpertAgent.MAX_STRAIGHT_ANGLE:
             rel_angle = 0.0
@@ -232,11 +233,12 @@ class ExpertAgent:
         for i in range(3, max_nb_paths - 1):
             current_path_center = next_path_center
             next_path_center = (from_polar_to_cartesian(state['paths_start'][i + 1]) + from_polar_to_cartesian(state['paths_end'][i + 1])) / 2.0
-            v1 = from_polar_to_cartesian(state['paths_end'][i]) - from_polar_to_cartesian(state['paths_start'][i])
+            v1 = v2
             v2 = next_path_center - current_path_center
             angle2 = get_xz_angle_between(v1, v2)
             new_rel_angle = angle1 + angle2
             # If the relative angle is small enough, consider it straight
+            print("New relative angle:", new_rel_angle)
             if abs(new_rel_angle) < ExpertAgent.MAX_STRAIGHT_ANGLE:
                 new_rel_angle = 0.0
             # If the new relative angle contradicts the previous one, stop here as it means the track changed direction

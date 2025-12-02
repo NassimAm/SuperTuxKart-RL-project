@@ -4,3 +4,4 @@ gymnasium
 pystk2-gymnasium
 tqdm
 neptune
+python-dotenv

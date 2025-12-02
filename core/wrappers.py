@@ -324,9 +324,46 @@ class ExpertObservations(Wrapper):
         overall_distance = max(0.0, kart.overall_distance)
         track_length = self.env.unwrapped.track.length
         full_distance = self.env.unwrapped.config.laps * track_length
-        observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
         observation['distance_down_track'] = max(0.0, min(kart.distance_down_track / track_length, 1.0))
         observation['overall_distance_ratio'] = max(0.0, min(overall_distance / full_distance, 1.0))
+        # Get more accurate paths
+        # Start with the current path
+        current_node = kart.node
+        current_path_start = self.__kartview(self.env.unwrapped.track.path_nodes[current_node][0])
+        if self.polar_observations:
+            current_path_start = from_cartesian_to_polar(current_path_start)
+        current_path_end = self.__kartview(self.env.unwrapped.track.path_nodes[current_node][1])
+        if self.polar_observations:
+            current_path_end = from_cartesian_to_polar(current_path_end)
+        current_path_width = self.env.unwrapped.track.path_width[current_node]
+        current_path_distance = self.env.unwrapped.track.path_distance[current_node]
+        paths_start = [current_path_start]
+        paths_end = [current_path_end]
+        paths_width = [current_path_width]
+        paths_distance = [current_path_distance]
+        state_paths = observation['paths_start'].shape[0]
+        for _ in range(1, state_paths):
+            successor = self.env.unwrapped.track.successors[current_node][0]  # For simplicity, take the first successor
+            path_start = self.__kartview(self.env.unwrapped.track.path_nodes[successor][0])
+            if self.polar_observations:
+                path_start = from_cartesian_to_polar(path_start)
+            path_end = self.__kartview(self.env.unwrapped.track.path_nodes[successor][1])
+            if self.polar_observations:
+                path_end = from_cartesian_to_polar(path_end)
+            path_width = self.env.unwrapped.track.path_width[successor]
+            path_distance = self.env.unwrapped.track.path_distance[successor]
+            paths_start.append(path_start)
+            paths_end.append(path_end)
+            paths_width.append(path_width)
+            paths_distance.append(path_distance)
+            current_node = successor
+        # Convert to numpy arrays
+        observation['paths_start'] = np.array(paths_start)
+        observation['paths_end'] = np.array(paths_end)
+        observation['paths_width'] = np.array(paths_width)
+        observation['paths_distance'] = np.array(paths_distance)
+        # Normalize path distances
+        observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
         # Add current lap
         observation['current_lap'] = kart.finished_laps
         # Add game time
