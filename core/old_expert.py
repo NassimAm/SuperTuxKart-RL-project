@@ -151,7 +151,7 @@ class ExpertAgent:
         """Initializes the ExpertAgent with default settings."""
         self.env = env.unwrapped
         self.config = config
-        self.max_speed = ExpertAgent.MAX_SPEED * ExpertAgent.MAX_SPEED_FACTORS[env.unwrapped.difficulty]
+        self.max_speed = ExpertAgent.MAX_SPEED * ExpertAgent.MAX_SPEED_FACTORS[self.env.difficulty]
         self.enable_drift = enable_drift
 
     def get_action(self, input_state: dict) -> np.ndarray:

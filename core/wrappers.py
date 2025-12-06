@@ -2,10 +2,24 @@ from gymnasium import Env, Wrapper, ObservationWrapper
 from gymnasium.spaces import Box, Discrete, Sequence
 from core.state import Phase, Powerup, Attachment
 from core.expert import ExpertAgent
-from core.utils import from_cartesian_to_polar, rotate
+from core.utils import from_cartesian_to_polar, from_polar_to_cartesian, get_xz_angle_between, rotate
 from copy import deepcopy
 import numpy as np
 from typing import Optional
+
+
+def kartview(env, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation: bool = True):
+    """Returns a vector in the kart frame
+
+    X right, Y up, Z forwards
+    """
+    kart = env.unwrapped.world.karts[env.unwrapped.kart_ix]
+    x_proj = x
+    if make_relative_to_kart:
+        x_proj = x - kart.location
+    if adapt_to_kart_rotation:
+        x_proj = rotate(x_proj, kart.rotation)
+    return x_proj
 
 
 class CustomPolarObservations(ObservationWrapper):
@@ -128,33 +142,6 @@ class EnhanceObservations(Wrapper):
         return observation, reward, terminated, truncated, info
 
 
-class StuckObservationWrapper(ObservationWrapper):
-    """An observation wrapper that adds a 'stuck' indicator to the observation."""
-
-    def __init__(self, env: Env):
-        """An observation wrapper that adds a 'stuck' indicator to the observation.
-
-        :param env: The environment to wrap.
-        """
-        super().__init__(env)
-
-        # Update the observation space to include the 'stuck' indicator
-        self.observation_space = deepcopy(env.observation_space)
-        self.observation_space['stuck'] = Discrete(
-            n=2,  # 0: not stuck, 1: stuck
-            dtype=np.int32,
-        )
-
-    def observation(self, observation):
-        """Add the 'stuck' indicator to the observation.
-
-        :param observation: The original observation.
-        :return: The modified observation with the 'stuck' indicator.
-        """
-        observation['stuck'] = int((observation['phase'] == Phase.RACE_PHASE.value) and (np.linalg.norm(observation['velocity']) < 0.2))  # TODO: This isn't very robust, correct it
-        return observation
-
-
 class ExpertObservations(Wrapper):
     """An observation wrapper that adds more detailed observations."""
 
@@ -204,6 +191,11 @@ class ExpertObservations(Wrapper):
             shape=(),
             dtype=np.float32,
         )
+        # Add is on road
+        self.observation_space['is_on_road'] = Discrete(
+            n=2,
+            dtype=np.int32,
+        )
         # Add nitro time left
         self.nitro_duration_time_left = 0.0
         self.observation_space['nitro_duration_time_left'] = Box(
@@ -232,6 +224,13 @@ class ExpertObservations(Wrapper):
             low=0.0,
             high=float('inf'),
             shape=(),
+            dtype=np.float32,
+        )
+        # Path widths
+        self.observation_space['paths_width'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(self.env.observation_space['paths_start'].shape[0],),
             dtype=np.float32,
         )
         # Path distances
@@ -329,10 +328,10 @@ class ExpertObservations(Wrapper):
         # Get more accurate paths
         # Start with the current path
         current_node = kart.node
-        current_path_start = self.__kartview(self.env.unwrapped.track.path_nodes[current_node][0])
+        current_path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][0])
         if self.polar_observations:
             current_path_start = from_cartesian_to_polar(current_path_start)
-        current_path_end = self.__kartview(self.env.unwrapped.track.path_nodes[current_node][1])
+        current_path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][1])
         if self.polar_observations:
             current_path_end = from_cartesian_to_polar(current_path_end)
         current_path_width = self.env.unwrapped.track.path_width[current_node]
@@ -344,10 +343,10 @@ class ExpertObservations(Wrapper):
         state_paths = observation['paths_start'].shape[0]
         for _ in range(1, state_paths):
             successor = self.env.unwrapped.track.successors[current_node][0]  # For simplicity, take the first successor
-            path_start = self.__kartview(self.env.unwrapped.track.path_nodes[successor][0])
+            path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][0])
             if self.polar_observations:
                 path_start = from_cartesian_to_polar(path_start)
-            path_end = self.__kartview(self.env.unwrapped.track.path_nodes[successor][1])
+            path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][1])
             if self.polar_observations:
                 path_end = from_cartesian_to_polar(path_end)
             path_width = self.env.unwrapped.track.path_width[successor]
@@ -364,10 +363,27 @@ class ExpertObservations(Wrapper):
         observation['paths_distance'] = np.array(paths_distance)
         # Normalize path distances
         observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
+        # Get distance to center of current path
+        path_start = observation['paths_start'][0]
+        if self.polar_observations:
+            path_start = from_polar_to_cartesian(path_start)
+        path_end = observation['paths_end'][0]
+        if self.polar_observations:
+            path_end = from_polar_to_cartesian(path_end)
+        path_dir = path_end - path_start
+        path_length = np.linalg.norm(path_dir)
+        path_dir /= path_length
+        rel_pos = -path_start
+        proj_length = np.dot(rel_pos, path_dir)
+        proj_h = rel_pos - proj_length * path_dir
+        signed_distance = (np.sign(get_xz_angle_between(path_dir, proj_h)) * np.linalg.norm(proj_h)).item()
+        observation['center_path_distance'] = signed_distance
         # Add current lap
         observation['current_lap'] = kart.finished_laps
         # Add game time
         observation['game_time'] = self.env.unwrapped.world.time
+        # Add is on road
+        observation['is_on_road'] = int(kart.is_on_road)
         # Add nitro time left
         if did_nitro:
             # If the kart used nitro, reset the nitro time left
@@ -430,7 +446,7 @@ class ExpertObservations(Wrapper):
             if kart_ix == self.env.unwrapped.kart_ix:
                 continue  # Skip self
             # Relative position
-            kart_pos = self.__kartview(other_kart.location)
+            kart_pos = kartview(self.env, other_kart.location)
             if self.polar_observations:
                 kart_pos = from_cartesian_to_polar(kart_pos)
             kart_positions.append(kart_pos)
@@ -440,7 +456,7 @@ class ExpertObservations(Wrapper):
             rel_rank = normalized_other_rank - normalized_rank
             karts_rel_rank.append(rel_rank)
             # Velocity (3D vector)
-            velocity = self.__kartview(other_kart.velocity, make_relative_to_kart=False)
+            velocity = kartview(self.env, other_kart.velocity, make_relative_to_kart=False)
             karts_velocity.append(velocity)
             # Track distance difference
             other_kart_overall_distance = max(0.0, other_kart.overall_distance)
@@ -524,15 +540,79 @@ class ExpertObservations(Wrapper):
         new_obs = self.get_new_observation(obs, action=action, did_nitro=did_nitro, did_zipper=did_zipper, reset=False)
         return new_obs, reward, terminated, truncated, info
 
-    def __kartview(self, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation: bool = True):
-        """Returns a vector in the kart frame
 
-        X right, Y up, Z forwards
+class StuckObservationWrapper(ObservationWrapper):
+    """An observation wrapper that adds a 'stuck' indicator to the observation."""
+
+    def __init__(self, env: Env, polar_observations: bool = True):
+        """An observation wrapper that adds a 'stuck' indicator to the observation.
+
+        :param env: The environment to wrap.
         """
-        kart = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix]
-        x_proj = x
-        if make_relative_to_kart:
-            x_proj = x - kart.location
-        if adapt_to_kart_rotation:
-            x_proj = rotate(x_proj, kart.rotation)
-        return x_proj
+        super().__init__(env)
+
+        # Update the observation space to include the 'stuck' indicator
+        self.observation_space = deepcopy(env.observation_space)
+        self.is_stuck = False
+        self.is_being_rescued = False
+        self.observation_space['stuck'] = Discrete(
+            n=2,  # 0: not stuck, 1: stuck
+            dtype=np.int32,
+        )
+        self.time_since_stuck = 0.0
+        self.observation_space['time_since_stuck'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        self.polar_observations = polar_observations
+
+    def observation(self, observation):
+        """Add the 'stuck' indicator to the observation.
+
+        :param observation: The original observation.
+        :return: The modified observation with the 'stuck' indicator.
+        """
+        # Determine if the kart is being rescued
+        path_start = observation['paths_start'][0]
+        path_end = observation['paths_end'][0]
+        path_width = observation['paths_width'][0][0]
+        if self.polar_observations:
+            path_start = from_polar_to_cartesian(path_start)
+            path_end = from_polar_to_cartesian(path_end)
+        a = (path_end[1] - path_start[1]) / (path_end[2] - path_start[2])
+        b = path_start[1] - a * path_start[2]
+        distance_above_track = abs(min(b, 0)) - ExpertAgent.KART_HEIGHT / 2.0
+        print(f"B = {distance_above_track}")
+        if not self.is_being_rescued:  # If not already being rescued, check conditions to become rescued
+            self.is_being_rescued = ((not observation['jumping']) and  # Not jumping
+                                     (abs(path_start[0]) < path_width / 2.0) and  # Within the path
+                                     (abs(path_end[0]) < path_width / 2.0) and  # Within the path
+                                     (distance_above_track > 0.5))  # Above the track by more than half a meter
+        else:  # If already being rescued, check conditions to become not rescued
+            self.is_being_rescued = not ((distance_above_track < 0.05) and
+                                         (observation['prev_actions'][-1]['acceleration'] > 0) and
+                                         (observation['velocity'][2] > 0.2))  # Negation of "Is on track, tried to accelerate and succeeded"
+        # Determine if the kart is stuck
+        if not self.is_stuck:  # If not already stuck, check conditions to become stuck
+            self.is_stuck = int((observation['phase'] == Phase.RACE_PHASE.value) and  # In race phase
+                                (not observation['jumping']) and  # Not jumping
+                                (not self.is_being_rescued) and  # Not being rescued
+                                (observation['prev_actions'][-1]['acceleration'] > 0) and  # Trying to accelerate
+                                (observation['velocity'][2] < 0.2))  # Very low forward velocity
+        else:  # If already stuck, check conditions to become not stuck
+            self.is_stuck = int((not self.is_being_rescued) and  # Not being rescued
+                                (not ((observation['prev_actions'][-1]['acceleration'] > 0) and
+                                      (observation['velocity'][2] > 0.2))))  # Negation of "Tried to accelerate and succeeded"
+        # Update time since stuck
+        if self.is_stuck:
+            self.time_since_stuck += self.env.unwrapped.config.step_size
+            self.time_since_stuck = min(self.time_since_stuck, 5.0)  # Cap at 5 seconds
+        else:
+            self.time_since_stuck = 0.0
+        # Update the observation
+        observation['stuck'] = self.is_stuck
+        observation['time_since_stuck'] = self.time_since_stuck
+        print(f"Stuck: {self.is_stuck}, Time since stuck: {self.time_since_stuck:.2f}s, Being rescued: {self.is_being_rescued}")
+        return observation

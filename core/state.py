@@ -121,7 +121,7 @@ class State(TypedDict):
     """Time left for the current attachment."""
     aux_ticks: float  # NOTE: Remove this because it's not useful (always 0.0)
     """Auxiliary ticks for various purposes."""
-    center_path: np.ndarray
+    center_path: np.ndarray  # TODO: Reimplement this in wrapper
     """Center path coordinates."""
     center_path_distance: float
     """Distance to the center path."""
@@ -139,8 +139,12 @@ class State(TypedDict):
     """Types of items on the track."""
     jumping: bool
     """Indicates if the kart is jumping."""
+    is_on_road: bool
+    """Indicates if the kart is on the road."""
     stuck: bool
     """Indicates if the kart is stuck."""
+    time_since_stuck: float
+    """Time since the kart got stuck."""
     karts_position: np.ndarray  # TODO: at least see one ahead if any and one behind if any
     """Positions of other karts."""  # TODO: figure out how to normalize positions (maybe clip the 3rd polar coordinate)
     karts_rel_rank: np.ndarray
@@ -248,7 +252,7 @@ class State(TypedDict):
             attachment_time_left=state['attachment_time_left'].item(),
             aux_ticks=state['aux_ticks'].item(),
             center_path=state['center_path'],
-            center_path_distance=state['center_path_distance'].item(),
+            center_path_distance=state['center_path_distance'],
             distance_down_track=state['distance_down_track'],
             overall_distance_ratio=state['overall_distance_ratio'],
             energy=state['energy'].item(),
@@ -256,7 +260,9 @@ class State(TypedDict):
             items_position=state['items_position'],
             items_type=[ItemType(e) for e in state['items_type']],
             jumping=bool(state['jumping']),
+            is_on_road=bool(state['is_on_road']),
             stuck=bool(state['stuck']),
+            time_since_stuck=state['time_since_stuck'],
             karts_position=state['karts_position'],
             karts_rel_rank=state['karts_rel_rank'],
             karts_velocity=state['karts_velocity'],
@@ -302,7 +308,9 @@ class State(TypedDict):
             'items_position': state['items_position'],
             'items_type': np.array([e.value for e in state['items_type']]),
             'jumping': state['jumping'],
+            'is_on_road': state['is_on_road'],
             'stuck': state['stuck'],
+            'time_since_stuck': state['time_since_stuck'],
             'karts_position': state['karts_position'],
             'karts_rel_rank': state['karts_rel_rank'],
             'karts_velocity': state['karts_velocity'],
@@ -346,7 +354,9 @@ class State(TypedDict):
             torch.tensor(state['items_position'].reshape(-1), dtype=torch.float32),
             torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
             torch.tensor([int(state['jumping'])], dtype=torch.float32),
+            torch.tensor([int(state['is_on_road'])], dtype=torch.float32),
             torch.tensor([int(state['stuck'])], dtype=torch.float32),
+            torch.tensor([state['time_since_stuck']], dtype=torch.float32),
             torch.tensor(state['karts_position'].reshape(-1), dtype=torch.float32),
             torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
             torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
@@ -368,6 +378,7 @@ class State(TypedDict):
             torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
             torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
             torch.tensor([state['skid_direction']], dtype=torch.float32),
+            torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
             torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
             torch.cat([Action.to_model(a) for a in state['prev_actions'][:previous_action_horizon]] if len(state['prev_actions']) > 0 else [Action.to_model(Action.empty()) for _ in range(previous_action_horizon)])
         ])
