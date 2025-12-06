@@ -320,7 +320,6 @@ class ExpertAgent:
             curve_radius (Optional[float]): The radius of the turn.
         """
         # Set the center of the next path segment as a default target point
-        # target_path_id = 1
         target_path_id = self.__get_target_path_id(state)
         target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Handle item collection and avoidance
@@ -370,45 +369,66 @@ class ExpertAgent:
         # as it's the safest choice (kart won't go off track)
         target_path_id = 1
 
-        # But aiming at paths further ahead is better in most cases
+        # Aiming at paths further ahead is better in most cases
         # as it allows to better anticipate turns but it's more risky
-        # Experimentally, we found that choosing to aim at the path segment that comes
-        # after the next path segment works well even in high speed situations.
-        # Therefore, we implement a simple heuristic to decide when to do that.
+        # To be able to aim further, we need to make sure that the kart can
+        # stay within the track boundaries until that path segment
 
-        # Calculate angles to the edges of the current path segment
-        current_path_start = from_polar_to_cartesian(state['paths_start'][0])
-        current_path_end = from_polar_to_cartesian(state['paths_end'][0])
-        current_path_width = state['paths_width'][0]
-        current_path_dir = current_path_end - current_path_start
-        side_vec = np.array([current_path_dir[2], 0.0, -current_path_dir[0]])  # to the right
-        side_vec /= np.linalg.norm(side_vec)  # normalize
-        left_edge = current_path_start - (current_path_width / 2.0) * side_vec
-        right_edge = current_path_start + (current_path_width / 2.0) * side_vec
-        angle_to_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), left_edge)
-        angle_to_right_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), right_edge)
-        # Calculate angles to the edges of the next path segment
-        next_path_start = from_polar_to_cartesian(state['paths_start'][1])
-        next_path_end = from_polar_to_cartesian(state['paths_end'][1])
-        next_path_width = state['paths_width'][1]
-        next_path_dir = next_path_end - next_path_start
-        next_side_vec = np.array([next_path_dir[2], 0.0, -next_path_dir[0]])  # to the right
-        next_side_vec /= np.linalg.norm(next_side_vec)  # normalize
-        next_left_edge = next_path_start - (next_path_width / 2.0) * next_side_vec
-        next_right_edge = next_path_start + (next_path_width / 2.0) * next_side_vec
-        angle_to_next_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_left_edge)
-        angle_to_next_right_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_right_edge)
-        # Calculate target angle range
-        target_angle_min = max(angle_to_left_edge, angle_to_next_left_edge)
-        target_angle_max = min(angle_to_right_edge, angle_to_next_right_edge)
-        # Calculate angle to the center of the path after the next
-        further_path_center = (from_polar_to_cartesian(state['paths_start'][2]) + from_polar_to_cartesian(state['paths_end'][2])) / 2.0
-        angle_to_further_path = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), further_path_center)
-        # If the angle to the further path is within the target angle range, aim for it
-        if (angle_to_further_path > target_angle_min) and (angle_to_further_path < target_angle_max):
-            target_path_id = 2
+        # We do that by checking the angle range defined by the end edges of the path segments
+        # We aim at the furthest path segment whose center is still within an angle range of at least 45 degrees
+
+        # Get current path direction
+        current_path_dir = from_polar_to_cartesian(state['paths_end'][0]) - from_polar_to_cartesian(state['paths_start'][0])
+        # Get current path end edges
+        left_edge, right_edge = self.__get_path_end_edges(state, 0)
+        # Compute angles between path direction and edges
+        angle_left = get_xz_angle_between(current_path_dir, left_edge)
+        angle_right = get_xz_angle_between(current_path_dir, right_edge)
+        # Initialize target angle range
+        target_angle_min = angle_left
+        target_angle_max = angle_right
+        # Get max number of paths
+        max_nb_paths = len(state['paths_start'])
+        # Iterate over future path segments to find the furthest safe target
+        for path_id in range(1, max_nb_paths - 1):
+            # Get next path end edges
+            left_edge, right_edge = self.__get_path_end_edges(state, path_id)
+            # Compute angles between next path direction and edges
+            angle_left = get_xz_angle_between(current_path_dir, left_edge)
+            angle_right = get_xz_angle_between(current_path_dir, right_edge)
+            # Update target angle range
+            target_angle_min = max(target_angle_min, angle_left)
+            target_angle_max = min(target_angle_max, angle_right)
+            # Get center of the next path segment
+            next_path_center = (from_polar_to_cartesian(state['paths_start'][path_id + 1]) + from_polar_to_cartesian(state['paths_end'][path_id + 1])) / 2.0
+            # If the center of the next path segment is outside the target angle range, or the angle range got too narrow (less than 45 degrees), stop here
+            angle_to_next_path = get_xz_angle_between(current_path_dir, next_path_center)
+            if (target_angle_max - target_angle_min < 0.785) or (angle_to_next_path <= target_angle_min) or (angle_to_next_path >= target_angle_max):
+                return target_path_id
+            # Otherwise, update the target path ID
+            target_path_id = path_id + 1
         # Return the target path ID
         return target_path_id
+
+    def __get_path_end_edges(self, state: State, path_id: int):
+        """Returns the left and right edges of the end of a given path segment.
+
+        Args:
+            state (State): The current state of the environment.
+            path_id (int): The ID of the path segment.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: The left and right edges of the end of the path segment.
+        """
+        path_start = from_polar_to_cartesian(state['paths_start'][path_id])
+        path_end = from_polar_to_cartesian(state['paths_end'][path_id])
+        path_width = state['paths_width'][path_id]
+        path_dir = path_end - path_start
+        side_vec = np.array([path_dir[2], 0.0, -path_dir[0]])  # to the right
+        side_vec /= np.linalg.norm(side_vec)  # normalize
+        left_edge = path_end - (path_width / 2.0) * side_vec
+        right_edge = path_end + (path_width / 2.0) * side_vec
+        return left_edge, right_edge
 
     def __get_items_ahead(self, state: State):
         """Returns a list of item IDs that are ahead of the kart in the current path segment.
