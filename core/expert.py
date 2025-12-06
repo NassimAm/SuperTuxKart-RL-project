@@ -320,7 +320,8 @@ class ExpertAgent:
             curve_radius (Optional[float]): The radius of the turn.
         """
         # Set the center of the next path segment as a default target point
-        target_path_id = 2
+        # target_path_id = 1
+        target_path_id = self.__get_target_path_id(state)
         target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Handle item collection and avoidance
         items_to_collect, items_to_avoid = self.__get_items_ahead(state)
@@ -355,6 +356,59 @@ class ExpertAgent:
         target_position = from_polar_to_cartesian(state['paths_start'][1])
         steer_angle = self.__steer_to_point(target_position)
         self.__set_steering(state, action, steer_angle, DirectionType.DIR_UNDEFINED, None, None, None)
+
+    def __get_target_path_id(self, state: State):
+        """Returns the target path ID based on the current state.
+
+        Args:
+            state (State): The current state of the environment.
+
+        Returns:
+            int: The target path ID.
+        """
+        # By default, we aim at the next path segment
+        # as it's the safest choice (kart won't go off track)
+        target_path_id = 1
+
+        # But aiming at paths further ahead is better in most cases
+        # as it allows to better anticipate turns but it's more risky
+        # Experimentally, we found that choosing to aim at the path segment that comes
+        # after the next path segment works well even in high speed situations.
+        # Therefore, we implement a simple heuristic to decide when to do that.
+
+        # Calculate angles to the edges of the current path segment
+        current_path_start = from_polar_to_cartesian(state['paths_start'][0])
+        current_path_end = from_polar_to_cartesian(state['paths_end'][0])
+        current_path_width = state['paths_width'][0]
+        current_path_dir = current_path_end - current_path_start
+        current_path_dir /= np.linalg.norm(current_path_dir)
+        side_vec = np.array([current_path_dir[2], 0.0, -current_path_dir[0]])  # to the right
+        left_edge = current_path_start - (current_path_width / 2.0) * side_vec
+        right_edge = current_path_start + (current_path_width / 2.0) * side_vec
+        angle_to_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), left_edge)
+        angle_to_right_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), right_edge)
+        # Calculate angles to the edges of the next path segment
+        next_path_start = from_polar_to_cartesian(state['paths_start'][1])
+        next_path_end = from_polar_to_cartesian(state['paths_end'][1])
+        next_path_width = state['paths_width'][1]
+        next_path_dir = next_path_end - next_path_start
+        next_path_dir /= np.linalg.norm(next_path_dir)
+        next_side_vec = np.array([next_path_dir[2], 0.0, -next_path_dir[0]])  # to the right
+        next_left_edge = next_path_start - (next_path_width / 2.0) * side_vec
+        next_right_edge = next_path_start + (next_path_width / 2.0) * next_side_vec
+        angle_to_next_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_left_edge)
+        angle_to_next_right_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_right_edge)
+        # Calculate target angle range
+        target_angle_min = max(angle_to_left_edge, angle_to_next_left_edge)
+        target_angle_max = min(angle_to_right_edge, angle_to_next_right_edge)
+        # Calculate angle to the center of the path after the next
+        further_path_center = (from_polar_to_cartesian(state['paths_start'][2]) + from_polar_to_cartesian(state['paths_end'][2])) / 2.0
+        angle_to_further_path = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), further_path_center)
+        # If the angle to the further path is within the target angle range, aim for it
+        if (angle_to_further_path > target_angle_min) and (angle_to_further_path < target_angle_max):
+            target_path_id = 2
+        # Return the target path ID
+        return target_path_id
 
     def __get_items_ahead(self, state: State):
         """Returns a list of item IDs that are ahead of the kart in the current path segment.

@@ -19,9 +19,9 @@ def collect_trajectories(data_path: str, difficulty: int = 3):
     wrappers = [
         lambda env: ConstantSizedObservations(env, state_paths=10),
         lambda env: EnhanceObservations(env),
-        lambda env: StuckObservationWrapper(env),
         lambda env: CustomPolarObservations(env),
-        lambda env: ExpertObservations(env, polar_observations=True, previous_action_horizon=previous_action_horizon)
+        lambda env: ExpertObservations(env, polar_observations=True, previous_action_horizon=previous_action_horizon),
+        lambda env: StuckObservationWrapper(env, polar_observations=True)
     ]
     for wrapper in wrappers:
         env = wrapper(env)

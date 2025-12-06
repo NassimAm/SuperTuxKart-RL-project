@@ -541,7 +541,7 @@ class ExpertObservations(Wrapper):
         return new_obs, reward, terminated, truncated, info
 
 
-class StuckObservationWrapper(ObservationWrapper):
+class StuckObservationWrapper(Wrapper):
     """An observation wrapper that adds a 'stuck' indicator to the observation."""
 
     def __init__(self, env: Env, polar_observations: bool = True):
@@ -568,7 +568,29 @@ class StuckObservationWrapper(ObservationWrapper):
         )
         self.polar_observations = polar_observations
 
-    def observation(self, observation):
+    def reset(self, **kwargs):
+        """Reset the environment and the stuck indicators.
+
+        :return: The initial observation and info dictionary.
+        """
+        observation, info = self.env.reset(**kwargs)
+        self.is_stuck = False
+        self.is_being_rescued = False
+        self.time_since_stuck = 0.0
+        observation['stuck'] = int(self.is_stuck)
+        observation['time_since_stuck'] = self.time_since_stuck
+        return observation, info
+
+    def step(self, action):
+        """Step the environment and update the stuck indicators.
+
+        :param action: The action to take.
+        """
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        observation = self.get_new_observation(observation)
+        return observation, reward, terminated, truncated, info
+
+    def get_new_observation(self, observation):
         """Add the 'stuck' indicator to the observation.
 
         :param observation: The original observation.
@@ -601,9 +623,10 @@ class StuckObservationWrapper(ObservationWrapper):
                                 (observation['prev_actions'][-1]['acceleration'] > 0) and  # Trying to accelerate
                                 (observation['velocity'][2] < 0.2))  # Very low forward velocity
         else:  # If already stuck, check conditions to become not stuck
-            self.is_stuck = int((not self.is_being_rescued) and  # Not being rescued
+            self.is_stuck = int(((not self.is_being_rescued) and  # Not being rescued
                                 (not ((observation['prev_actions'][-1]['acceleration'] > 0) and
-                                      (observation['velocity'][2] > 0.2))))  # Negation of "Tried to accelerate and succeeded"
+                                      (observation['velocity'][2] > 0.2)))) or
+                                (self.time_since_stuck < 2.0))  # Negation of "Tried to accelerate and succeeded"
         # Update time since stuck
         if self.is_stuck:
             self.time_since_stuck += self.env.unwrapped.config.step_size
