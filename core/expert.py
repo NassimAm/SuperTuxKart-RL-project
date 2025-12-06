@@ -381,8 +381,8 @@ class ExpertAgent:
         current_path_end = from_polar_to_cartesian(state['paths_end'][0])
         current_path_width = state['paths_width'][0]
         current_path_dir = current_path_end - current_path_start
-        current_path_dir /= np.linalg.norm(current_path_dir)
         side_vec = np.array([current_path_dir[2], 0.0, -current_path_dir[0]])  # to the right
+        side_vec /= np.linalg.norm(side_vec)  # normalize
         left_edge = current_path_start - (current_path_width / 2.0) * side_vec
         right_edge = current_path_start + (current_path_width / 2.0) * side_vec
         angle_to_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), left_edge)
@@ -392,9 +392,9 @@ class ExpertAgent:
         next_path_end = from_polar_to_cartesian(state['paths_end'][1])
         next_path_width = state['paths_width'][1]
         next_path_dir = next_path_end - next_path_start
-        next_path_dir /= np.linalg.norm(next_path_dir)
         next_side_vec = np.array([next_path_dir[2], 0.0, -next_path_dir[0]])  # to the right
-        next_left_edge = next_path_start - (next_path_width / 2.0) * side_vec
+        next_side_vec /= np.linalg.norm(next_side_vec)  # normalize
+        next_left_edge = next_path_start - (next_path_width / 2.0) * next_side_vec
         next_right_edge = next_path_start + (next_path_width / 2.0) * next_side_vec
         angle_to_next_left_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_left_edge)
         angle_to_next_right_edge = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), next_right_edge)
