@@ -584,7 +584,6 @@ class StuckObservationWrapper(ObservationWrapper):
         a = (path_end[1] - path_start[1]) / (path_end[2] - path_start[2])
         b = path_start[1] - a * path_start[2]
         distance_above_track = abs(min(b, 0)) - ExpertAgent.KART_HEIGHT / 2.0
-        print(f"B = {distance_above_track}")
         if not self.is_being_rescued:  # If not already being rescued, check conditions to become rescued
             self.is_being_rescued = ((not observation['jumping']) and  # Not jumping
                                      (abs(path_start[0]) < path_width / 2.0) and  # Within the path
@@ -614,5 +613,4 @@ class StuckObservationWrapper(ObservationWrapper):
         # Update the observation
         observation['stuck'] = self.is_stuck
         observation['time_since_stuck'] = self.time_since_stuck
-        print(f"Stuck: {self.is_stuck}, Time since stuck: {self.time_since_stuck:.2f}s, Being rescued: {self.is_being_rescued}")
         return observation
