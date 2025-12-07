@@ -6,7 +6,7 @@ from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
 from core.state import State
 from core.action import Action
-from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservationWrapper, ExpertObservations
+from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
 from tqdm import tqdm
 import numpy as np
 import argparse
@@ -19,8 +19,8 @@ def collect_trajectories(data_path: str, difficulty: int = 3):
     wrappers = [
         lambda env: ConstantSizedObservations(env, state_paths=10),
         lambda env: EnhanceObservations(env),
+        lambda env: StuckObservations(env),
         lambda env: ExpertObservations(env),
-        lambda env: StuckObservationWrapper(env),
         lambda env: CustomPolarObservations(env)
     ]
     for wrapper in wrappers:

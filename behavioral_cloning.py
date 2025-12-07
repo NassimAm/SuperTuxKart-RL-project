@@ -165,7 +165,7 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
         torch.save(model.state_dict(), model_path)
         # Upload model to neptune
         if logging:
-            neptune_run["model/behavioral_cloning.pth"].upload(model_path)
+            neptune_run["model/behavioral_cloning"].upload(model_path)
 
         # Update progress bar description
         tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Loss: {np.mean(train_losses).item():.2f} - Test Loss: {np.mean(test_losses).item():.2f}")

@@ -1,19 +1,10 @@
-from core.state import State, Phase, Attachment, Powerup, ItemType
+from core.state import State, Phase, Attachment, Powerup, ItemType, DirectionType
 from core.action import Action
 from core.utils import from_polar_to_cartesian, get_xz_angle_between
 from typing import Optional
 import numpy as np
-from enum import Enum
 from gymnasium import Env
 from pystk2_gymnasium.envs import STKRaceEnv
-
-
-class DirectionType(Enum):
-    """To indicate in which direction the track is going: straight, left, right. The undefined direction is used by the AI only."""
-    DIR_STRAIGHT = 0
-    DIR_LEFT = 1
-    DIR_RIGHT = 2
-    DIR_UNDEFINED = 3
 
 
 class ExpertAgent:
@@ -319,8 +310,9 @@ class ExpertAgent:
             curve_center (Optional[np.ndarray]): The center of the turn (as a 3D point).
             curve_radius (Optional[float]): The radius of the turn.
         """
-        # Set the center of the next path segment as a default target point
+        # Get the target path ID
         target_path_id = self.__get_target_path_id(state)
+        # Get the target position
         target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Handle item collection and avoidance
         items_to_collect, items_to_avoid = self.__get_items_ahead(state)
