@@ -1,6 +1,6 @@
 import os
 from core.trajectory import TrajectoryDataset
-from core.nn import ActorMLP
+from core.nn import ActorMLP, ActorResMLP
 from core.action import Action
 import numpy as np
 from torch.utils.data import DataLoader
@@ -13,13 +13,15 @@ import neptune
 import argparse
 
 
-def train(data_path: str, model_path: str, experiment_name: Optional[str] = None, nb_epochs: int = 1000, batch_size: int = 1024, learning_rate: float = 1e-3,
+def train(data_path: str, model_path: str, drift_residual: bool = False, experiment_name: Optional[str] = None,
+          nb_epochs: int = 1000, batch_size: int = 1024, learning_rate: float = 1e-3,
           test_ratio: float = 0.1, logging: bool = False, tags: list[str] = [], cfg: Optional[dict] = None):
     """Train a behavioral cloning model on the given dataset.
 
     Args:
         data_path (str): Path to the dataset file (npz format).
         model_path (str): Path to save the trained model.
+        drift_residual (bool): Whether to use a residual model for drifting.
         experiment_name (Optional[str]): Name of the experiment for logging.
         nb_epochs (int): Number of training epochs.
         batch_size (int): Batch size for training.
@@ -88,7 +90,10 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
 
     # Create model
     state_dim = dataset.get_state_dim()
-    model = ActorMLP(input_dim=state_dim, hidden_dim=cfg["hidden_dim"]).to(device)
+    if drift_residual:
+        model = ActorResMLP(input_dim=state_dim, hidden_dim=cfg["hidden_dim"]).to(device)
+    else:
+        model = ActorMLP(input_dim=state_dim, hidden_dim=cfg["hidden_dim"]).to(device)
 
     # Training loop
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -106,7 +111,11 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
             actions_batch = actions_batch.to(device)
 
             optimizer.zero_grad()
-            pred_actions = model(states_batch)
+            if drift_residual:
+                steer_values = actions_batch[:, model.steer_index]
+                pred_actions = model(states_batch, steer_values=steer_values)
+            else:
+                pred_actions = model(states_batch)
 
             train_loss = 0.0
             for i, (name, action_type, pred_action) in enumerate(zip(Action.NAMES, action_types, pred_actions)):
@@ -192,6 +201,12 @@ if __name__ == "__main__":
         help="Path to save the trained model.",
     )
     parser.add_argument(
+        "--drift_residual",
+        "-r",
+        action="store_true",
+        help="Use a residual model for drifting.",
+    )
+    parser.add_argument(
         "--name",
         "-n",
         type=str,
@@ -241,6 +256,7 @@ if __name__ == "__main__":
     train(
         data_path=args.data_path,
         model_path=args.model_path,
+        drift_residual=args.drift_residual,
         experiment_name=args.name,
         tags=args.tags if args.tags is not None else [],
         nb_epochs=args.nb_epochs,

@@ -90,16 +90,16 @@ class Action(TypedDict):
             torch.tensor([action['steer']], dtype=torch.float32),
         ])
 
-    def get_types() -> list[str]:
+    def get_types() -> list[tuple[str, str]]:
         """Get the dimensions of each action component."""
         return [
-            'continuous-sigmoid',  # acceleration
-            'discrete',  # brake
-            'discrete',  # drift
-            'discrete',  # fire
-            'discrete',  # nitro
-            'discrete',  # rescue
-            'continuous-tanh',  # steer
+            ('acceleration', 'continuous-sigmoid'),  # acceleration
+            ('brake', 'discrete'),  # brake
+            ('drift', 'discrete'),  # drift
+            ('fire', 'discrete'),  # fire
+            ('nitro', 'discrete'),  # nitro
+            ('rescue', 'discrete'),  # rescue
+            ('steer', 'continuous-tanh'),  # steer
         ]
 
     def acceleration_to_continuous(acceleration_discrete: int, acceleration_steps: int = 5) -> float:

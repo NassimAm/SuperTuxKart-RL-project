@@ -1006,7 +1006,7 @@ class CustomPolarObservations(ObservationWrapper):
     #: Keys to transform (batch)
     KEYS = ["items_position", "karts_position", "paths_start", "paths_end", "karts_velocity"]
     #: Keys to transform (single)
-    SIMPLE_KEYS = ["center_path", "velocity"]
+    SIMPLE_KEYS = ["target_position", "obstacle_position", "center_path", "velocity"]
 
     def __init__(self, env: Env, **kwargs):
         super().__init__(env, **kwargs)
