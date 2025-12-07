@@ -194,7 +194,7 @@ class ExpertAgent:
         # Set default to no braking
         action['brake'] = False
         # Get current speed
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         # If the current track direction is right or left, speed is above max turn speed and kart is steering too much, brake
         if (track_direction == DirectionType.DIR_RIGHT) or (track_direction == DirectionType.DIR_LEFT):
             steer_value = state['prev_actions'][-1]['steer']
@@ -222,7 +222,7 @@ class ExpertAgent:
         # Don't use nitro if the kart is not on ground
         if state['jumping']:
             return
-        speed = np.linalg.norm(state['velocity'])
+        speed = state['velocity'][2]
         if speed + ExpertAgent.NITRO_MAX_SPEED_INCREASE > max_safe_speed:
             return
         # If a parachute or anvil is attached, the nitro don't give much
@@ -261,11 +261,11 @@ class ExpertAgent:
         if (time_until_fadeout >= (ExpertAgent.NITRO_FADE_OUT_TIME * 0.5)) and (not big_reserve):
             return
         # If trying to pass a bomb to a kart faster or far ahead, use nitro reserve
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         if (state['attachment'] == Attachment.BOMB) and (energy_reserve > 0):
             karts_rel_rank = state['karts_rel_rank']
             kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
-            if ((kart_ahead_id is not None) and (state['karts_distance'][kart_ahead_id] > 10.0)) or (np.linalg.norm(state['karts_velocity'][kart_ahead_id]) > speed):
+            if ((kart_ahead_id is not None) and (state['karts_distance'][kart_ahead_id] > 10.0)) or (state['karts_velocity'][kart_ahead_id][2] > speed):
                 energy_reserve = 0
         # Don't use nitro if building an energy reserve
         if state['energy'] <= energy_reserve:
@@ -295,7 +295,7 @@ class ExpertAgent:
         if has_slowdown_attachment:
             return
         # Get speed of the kart
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         # If we have a zipper, are going fast enough and don't have an active zipper, consider using it
         if (state['powerup'] == Powerup.ZIPPER) and (speed > 1.0) and (state['zipper_duration_time_left'] == 0):
             # If the track is straight enough for long enough, use the zipper
@@ -537,7 +537,7 @@ class ExpertAgent:
                 action['fire'] = True
                 return
         # Use shield if kart is going to hit a bad item (banana or bubblegum)
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_avoid) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_avoid[0][0]]))
             if ((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5:
@@ -588,8 +588,8 @@ class ExpertAgent:
                 if abs(angle) < 0.5:
                     rather_ahead = True
             # Do not fire if the kart is driving too slow
-            speed = np.linalg.norm(state['velocity'])
-            kart_ahead_is_slow = (kart_ahead_id is not None) and (np.linalg.norm(state['karts_velocity'][kart_ahead_id]) < speed)
+            speed = state['velocity'][2]
+            kart_ahead_is_slow = (kart_ahead_id is not None) and (state['karts_velocity'][kart_ahead_id][2] < speed)
             # Establish if we should fire
             fire_ahead = 0.0
             if kart_ahead_is_close and rather_ahead:
@@ -668,7 +668,7 @@ class ExpertAgent:
             items_to_avoid (list[tuple[int, int]]): List to store item IDs to avoid and their associated path IDs.
         """
         # Get current speed
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         # If there are items to avoid, and we are going towards them and close enough, use the switch
         if len(items_to_avoid) > 0:
             for (item_id, path_id) in items_to_avoid:
@@ -698,7 +698,7 @@ class ExpertAgent:
             return
         # if it is a bomb, wait : we may pass it to another kart before the timer runs out
         # but if we may collect a bonus box soon, use it now
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         has_bonus_box_ahead = False
         for (item_id, path_id) in items_to_collect:
             if state['items_type'][item_id] == ItemType.BONUS_BOX:
@@ -733,7 +733,7 @@ class ExpertAgent:
             items_to_avoid (list[tuple[int, int]]): List to store item IDs to avoid and their associated path IDs.
         """
         # Get current speed
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         # 1) If there are items to avoid, and we are going towards them, avoid them
         if self.avoid_bad_items and len(items_to_avoid) > 0:
             for (item_id, path_id) in items_to_avoid:
@@ -761,7 +761,7 @@ class ExpertAgent:
             for i, kart_pos in enumerate(state['karts_position']):
                 if state['karts_rel_rank'][i] < 0:
                     continue  # Only consider karts ahead
-                kart_speed = np.linalg.norm(state['karts_velocity'][i]).item()
+                kart_speed = state['karts_velocity'][i][2]
                 relative_speed = speed - kart_speed
                 if relative_speed <= 0:
                     continue  # Only consider karts that are slower than us
@@ -846,7 +846,7 @@ class ExpertAgent:
         # Get the center point of the upcoming path segment
         next_path_center = (from_polar_to_cartesian(state['paths_start'][1]) + from_polar_to_cartesian(state['paths_end'][1])) / 2.0
         # Get velocity vector
-        velocity = state['velocity']
+        velocity = from_polar_to_cartesian(state['velocity'])
         # Compute the angle between the velocity and the next path center
         velocity_to_next_angle = get_xz_angle_between(velocity, next_path_center)
         # If the angle is quite big, we consider the direction to be undefined to avoid
@@ -959,7 +959,7 @@ class ExpertAgent:
             return False
         # 2) Speed condition
         # Get current speed
-        speed = np.linalg.norm(state['velocity']).item()
+        speed = state['velocity'][2]
         # Only try to drift if we are above the minimum speed
         if speed < ExpertAgent.SKID_MIN_SPEED:
             return False

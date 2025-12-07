@@ -14,8 +14,21 @@ import argparse
 
 
 def train(data_path: str, model_path: str, experiment_name: Optional[str] = None, nb_epochs: int = 1000, batch_size: int = 1024, learning_rate: float = 1e-3,
-          test_ratio: float = 0.1, logging: bool = False, cfg: Optional[dict] = None):
-    """Train a behavioral cloning model on the given dataset."""
+          test_ratio: float = 0.1, logging: bool = False, tags: list[str] = [], cfg: Optional[dict] = None):
+    """Train a behavioral cloning model on the given dataset.
+
+    Args:
+        data_path (str): Path to the dataset file (npz format).
+        model_path (str): Path to save the trained model.
+        experiment_name (Optional[str]): Name of the experiment for logging.
+        nb_epochs (int): Number of training epochs.
+        batch_size (int): Batch size for training.
+        learning_rate (float): Learning rate for the optimizer.
+        test_ratio (float): Ratio of the dataset to use for testing.
+        logging (bool): Whether to log the training process to Neptune.
+        tags (list[str]): Tags for the Neptune experiment.
+        cfg (Optional[dict]): Configuration dictionary. If None, it will be loaded from CONFIG_PATH environment variable.
+    """
     # Load environment variables
     load_dotenv(override=True)
 
@@ -45,7 +58,8 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
         neptune_run = neptune.init_run(
             project=neptune_project,
             api_token=neptune_api_token,
-            name=experiment_name
+            name=experiment_name,
+            tags=tags
         )
         params = {
             "nb_epochs": nb_epochs,
@@ -55,6 +69,10 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
             **cfg
         }
         neptune_run["parameters"] = params
+        # Upload a copy of the state representation source code
+        neptune_run['src/state.py'].upload('core/state.py')
+        # Upload a copy of the action representation source code
+        neptune_run['src/action.py'].upload('core/action.py')
 
     # Check device
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -145,6 +163,9 @@ def train(data_path: str, model_path: str, experiment_name: Optional[str] = None
 
         # Save model
         torch.save(model.state_dict(), model_path)
+        # Upload model to neptune
+        if logging:
+            neptune_run["model/behavioral_cloning.pth"].upload(model_path)
 
         # Update progress bar description
         tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Loss: {np.mean(train_losses).item():.2f} - Test Loss: {np.mean(test_losses).item():.2f}")
@@ -176,6 +197,13 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Name of the experiment for logging.",
+    )
+    parser.add_argument(
+        "--tags",
+        "-t",
+        nargs="+",
+        default=None,
+        help="Tags for the experiment.",
     )
     parser.add_argument(
         "--nb_epochs",
@@ -214,6 +242,7 @@ if __name__ == "__main__":
         data_path=args.data_path,
         model_path=args.model_path,
         experiment_name=args.name,
+        tags=args.tags if args.tags is not None else [],
         nb_epochs=args.nb_epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,

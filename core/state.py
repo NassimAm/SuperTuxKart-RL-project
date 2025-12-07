@@ -378,7 +378,7 @@ class State(TypedDict):
             torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
             torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
             torch.tensor([state['skid_direction']], dtype=torch.float32),
-            torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
+            # torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
             torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
             torch.cat([Action.to_model(a) for a in state['prev_actions'][:previous_action_horizon]] if len(state['prev_actions']) > 0 else [Action.to_model(Action.empty()) for _ in range(previous_action_horizon)])
         ])

@@ -2,7 +2,7 @@ from gymnasium import Env, Wrapper, ObservationWrapper
 from gymnasium.spaces import Box, Discrete, Sequence
 from core.state import Phase, Powerup, Attachment
 from core.expert import ExpertAgent
-from core.utils import from_cartesian_to_polar, from_polar_to_cartesian, get_xz_angle_between, rotate
+from core.utils import from_cartesian_to_polar, get_xz_angle_between, rotate
 from copy import deepcopy
 import numpy as np
 from typing import Optional
@@ -20,46 +20,6 @@ def kartview(env, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation:
     if adapt_to_kart_rotation:
         x_proj = rotate(x_proj, kart.rotation)
     return x_proj
-
-
-class CustomPolarObservations(ObservationWrapper):
-    """Modifies position to polar positions
-
-    Angles are in radian
-
-    input: X right, Y up, Z forwards
-    output: (angle in the ZX plane, angle in the ZY plane, distance)
-    """
-    # TODO: Recheck what features should be in polar coordinates (for example velocities)
-    #: Keys to transform (batch)
-    KEYS = ["items_position", "karts_position", "paths_start", "paths_end"]
-    #: Keys to transform (single)
-    SIMPLE_KEYS = ["center_path"]
-
-    def __init__(self, env: Env, **kwargs):
-        super().__init__(env, **kwargs)
-
-    def observation(self, obs):
-        # Shallow copy
-        obs = {**obs}
-
-        for key in CustomPolarObservations.SIMPLE_KEYS:
-            v = obs[key]
-            v[:] = from_cartesian_to_polar(v)
-
-        for key in CustomPolarObservations.KEYS:
-            v = obs[key]
-
-            is_tuple = False
-            if isinstance(v, tuple):
-                is_tuple = True
-                v = np.stack(v)
-            v[:] = from_cartesian_to_polar(v)
-
-            if is_tuple:
-                obs[key] = tuple(x for x in v)
-
-        return obs
 
 
 class EnhanceObservations(Wrapper):
@@ -145,11 +105,10 @@ class EnhanceObservations(Wrapper):
 class ExpertObservations(Wrapper):
     """An observation wrapper that adds more detailed observations."""
 
-    def __init__(self, env: Env, polar_observations: bool = True, previous_action_horizon: int = 1):
+    def __init__(self, env: Env, previous_action_horizon: int = 1):
         """An observation wrapper that adds more detailed observations.
 
         :param env: The environment to wrap.
-        :param polar_observations: Whether to use polar observations for karts and items.
         :param previous_action_horizon: The number of previous actions to store in the observation.
         """
         super().__init__(env)
@@ -289,12 +248,10 @@ class ExpertObservations(Wrapper):
         self.time_since_last_fire = 0.0
         self.observation_space['time_since_last_fire'] = Box(
             low=0.0,
-            high=float('inf'),
+            high=ExpertAgent.MAX_TIME_SINCE_LAST_FIRE,
             shape=(),
             dtype=np.float32,
         )
-        # Save polar observations flag
-        self.polar_observations = polar_observations
         # Get previous actions
         self.observation_space['prev_actions'] = Sequence(
             space=self.env.action_space
@@ -329,11 +286,7 @@ class ExpertObservations(Wrapper):
         # Start with the current path
         current_node = kart.node
         current_path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][0])
-        if self.polar_observations:
-            current_path_start = from_cartesian_to_polar(current_path_start)
         current_path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][1])
-        if self.polar_observations:
-            current_path_end = from_cartesian_to_polar(current_path_end)
         current_path_width = self.env.unwrapped.track.path_width[current_node]
         current_path_distance = self.env.unwrapped.track.path_distance[current_node]
         paths_start = [current_path_start]
@@ -344,11 +297,7 @@ class ExpertObservations(Wrapper):
         for _ in range(1, state_paths):
             successor = self.env.unwrapped.track.successors[current_node][0]  # For simplicity, take the first successor
             path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][0])
-            if self.polar_observations:
-                path_start = from_cartesian_to_polar(path_start)
             path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][1])
-            if self.polar_observations:
-                path_end = from_cartesian_to_polar(path_end)
             path_width = self.env.unwrapped.track.path_width[successor]
             path_distance = self.env.unwrapped.track.path_distance[successor]
             paths_start.append(path_start)
@@ -365,11 +314,7 @@ class ExpertObservations(Wrapper):
         observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
         # Get distance to center of current path
         path_start = observation['paths_start'][0]
-        if self.polar_observations:
-            path_start = from_polar_to_cartesian(path_start)
         path_end = observation['paths_end'][0]
-        if self.polar_observations:
-            path_end = from_polar_to_cartesian(path_end)
         path_dir = path_end - path_start
         path_length = np.linalg.norm(path_dir)
         path_dir /= path_length
@@ -447,8 +392,6 @@ class ExpertObservations(Wrapper):
                 continue  # Skip self
             # Relative position
             kart_pos = kartview(self.env, other_kart.location)
-            if self.polar_observations:
-                kart_pos = from_cartesian_to_polar(kart_pos)
             kart_positions.append(kart_pos)
             # Relative rank
             other_rank = other_kart.position
@@ -544,7 +487,7 @@ class ExpertObservations(Wrapper):
 class StuckObservationWrapper(Wrapper):
     """An observation wrapper that adds a 'stuck' indicator to the observation."""
 
-    def __init__(self, env: Env, polar_observations: bool = True):
+    def __init__(self, env: Env):
         """An observation wrapper that adds a 'stuck' indicator to the observation.
 
         :param env: The environment to wrap.
@@ -566,7 +509,6 @@ class StuckObservationWrapper(Wrapper):
             shape=(),
             dtype=np.float32,
         )
-        self.polar_observations = polar_observations
 
     def reset(self, **kwargs):
         """Reset the environment and the stuck indicators.
@@ -600,9 +542,6 @@ class StuckObservationWrapper(Wrapper):
         path_start = observation['paths_start'][0]
         path_end = observation['paths_end'][0]
         path_width = observation['paths_width'][0][0]
-        if self.polar_observations:
-            path_start = from_polar_to_cartesian(path_start)
-            path_end = from_polar_to_cartesian(path_end)
         a = (path_end[1] - path_start[1]) / (path_end[2] - path_start[2])
         b = path_start[1] - a * path_start[2]
         distance_above_track = abs(min(b, 0)) - ExpertAgent.KART_HEIGHT / 2.0
@@ -637,3 +576,43 @@ class StuckObservationWrapper(Wrapper):
         observation['stuck'] = self.is_stuck
         observation['time_since_stuck'] = self.time_since_stuck
         return observation
+
+
+class CustomPolarObservations(ObservationWrapper):
+    """Modifies position to polar positions
+
+    Angles are in radian
+
+    input: X right, Y up, Z forwards
+    output: (angle in the ZX plane, angle in the ZY plane, distance)
+    """
+    # TODO: Recheck what features should be in polar coordinates (for example velocities)
+    #: Keys to transform (batch)
+    KEYS = ["items_position", "karts_position", "paths_start", "paths_end", "karts_velocity"]
+    #: Keys to transform (single)
+    SIMPLE_KEYS = ["center_path", "velocity"]
+
+    def __init__(self, env: Env, **kwargs):
+        super().__init__(env, **kwargs)
+
+    def observation(self, obs):
+        # Shallow copy
+        obs = {**obs}
+
+        for key in CustomPolarObservations.SIMPLE_KEYS:
+            v = obs[key]
+            v[:] = from_cartesian_to_polar(v)
+
+        for key in CustomPolarObservations.KEYS:
+            v = obs[key]
+
+            is_tuple = False
+            if isinstance(v, tuple):
+                is_tuple = True
+                v = np.stack(v)
+            v[:] = from_cartesian_to_polar(v)
+
+            if is_tuple:
+                obs[key] = tuple(x for x in v)
+
+        return obs
