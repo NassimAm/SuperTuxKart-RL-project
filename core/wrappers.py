@@ -44,8 +44,7 @@ class EnhanceObservations(Wrapper):
         self.observation_space = deepcopy(env.observation_space)
         # Update the observation space to include the new phase representation
         self.observation_space['phase'] = Discrete(
-            n=len(Phase),
-            dtype=env.observation_space['phase'].dtype,
+            n=len(Phase)
         )
         self.observation_space['nb_steps_since_set'] = Box(
             low=0,
@@ -54,13 +53,11 @@ class EnhanceObservations(Wrapper):
             dtype=np.int32,
         )
         self.observation_space['should_accelerate_in_start'] = Discrete(
-            n=2,
-            dtype=np.int32,
+            n=2
         )
         # Update with the new powerup state
         self.observation_space['powerup'] = Discrete(
-            n=len(Powerup),
-            dtype=env.observation_space['powerup'].dtype,
+            n=len(Powerup)
         )
         # Save number of steps to track phases
         self.nb_steps = 0
@@ -101,8 +98,7 @@ class EnhanceObservations(Wrapper):
         )
         # Add is on road
         self.observation_space['is_on_road'] = Discrete(
-            n=2,
-            dtype=np.int32,
+            n=2
         )
         # Add nitro time left
         self.nitro_duration_time_left = 0.0
@@ -489,7 +485,6 @@ class StuckObservations(Wrapper):
         self.is_being_rescued = False
         self.observation_space['stuck'] = Discrete(
             n=2,  # 0: not stuck, 1: stuck
-            dtype=np.int32,
         )
         self.time_since_stuck = 0.0
         self.observation_space['time_since_stuck'] = Box(
@@ -1002,7 +997,6 @@ class CustomPolarObservations(ObservationWrapper):
     input: X right, Y up, Z forwards
     output: (angle in the ZX plane, angle in the ZY plane, distance)
     """
-    # TODO: Recheck what features should be in polar coordinates (for example velocities)
     #: Keys to transform (batch)
     KEYS = ["items_position", "karts_position", "paths_start", "paths_end", "karts_velocity"]
     #: Keys to transform (single)
