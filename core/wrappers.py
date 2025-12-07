@@ -625,7 +625,7 @@ class ExpertObservations(Wrapper):
         else:  # If the track direction is undefined
             curve_length = None
         # Duration to complete the curve at current speed and clamped to 5 seconds max
-        curve_duration = min(curve_length / kart_speed if (curve_length is not None and kart_speed > 0) else -1.0, 5.0)
+        curve_duration = min(curve_length / kart_speed if (curve_length is not None and kart_speed > 0) else 0.0, 5.0)
         # Get items ahead
         items_to_collect, items_to_avoid = self.__get_items_ahead(observation)
         # Get obstacles ahead
@@ -636,7 +636,7 @@ class ExpertObservations(Wrapper):
         observation['target_position'] = target_position
         observation['curve_duration'] = curve_duration
         observation['avoid_obstacle'] = int(avoid_obstacle)
-        observation['obstacle_position'] = obstacle_position if obstacle_position is not None else np.full((3,), -1.0)
+        observation['obstacle_position'] = obstacle_position if obstacle_position is not None else np.full((3,), 0.0)
         # Return the new observation
         return observation
 

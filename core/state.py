@@ -343,7 +343,15 @@ class State(TypedDict):
 
     def to_model(state: 'State', previous_action_horizon: int = 1) -> torch.Tensor:
         """Convert the state to the model's expected format."""
-
+        # Items can be very far so we clip distances to a max value
+        max_item_distance = 50.0
+        items_position = state['items_position'].copy()
+        items_position[:, 2] = np.clip(items_position[:, 2], 0.0, max_item_distance)
+        # Karts can be very far so we clip distances to a max value
+        max_kart_distance = 50.0
+        karts_position = state['karts_position'].copy()
+        karts_position[:, 2] = np.clip(karts_position[:, 2], 0.0, max_kart_distance)
+        karts_distance = np.clip(state['karts_distance'], 0.0, max_kart_distance)
         return torch.concat([
             # Race stats
             torch.tensor([state['rank']], dtype=torch.float32),
@@ -358,13 +366,13 @@ class State(TypedDict):
             torch.tensor([state['time_since_stuck']], dtype=torch.float32),
             torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
             # Important data for steering
-            torch.tensor(state['target_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['target_position'].reshape(-1), dtype=torch.float32),  # clip?
             torch.tensor([state['max_steer_angle']], dtype=torch.float32),
             torch.tensor([state['center_path_distance']], dtype=torch.float32),
             torch.tensor([state['paths_width'][0]], dtype=torch.float32),
             # Important data for avoiding obstacles
             torch.tensor([int(state['avoid_obstacle'])], dtype=torch.float32),
-            torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),  # clip?
             # Important data for braking
             torch.tensor([state['speed_radius_ratio']], dtype=torch.float32),
             # Important data for drifting
@@ -384,13 +392,13 @@ class State(TypedDict):
             torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
             torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
             # Items
-            torch.tensor(state['items_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(items_position.reshape(-1), dtype=torch.float32),
             torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
             # Other karts
-            torch.tensor(state['karts_position'].reshape(-1), dtype=torch.float32),
+            torch.tensor(karts_position.reshape(-1), dtype=torch.float32),
             torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
             torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
-            torch.tensor(state['karts_distance'].reshape(-1), dtype=torch.float32),
+            torch.tensor(karts_distance.reshape(-1), dtype=torch.float32),
             torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
             # Previous actions
             torch.cat([Action.to_model(a) for a in state['prev_actions'][:previous_action_horizon]] if len(state['prev_actions']) > 0 else [Action.to_model(Action.empty()) for _ in range(previous_action_horizon)])
