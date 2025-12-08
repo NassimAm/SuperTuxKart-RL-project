@@ -19,7 +19,7 @@ class Actor:
             hidden_dim (int): Dimension of the hidden layers in the model.
         """
         self.model = ActorMLP(input_dim, hidden_dim)
-        self.model.load_state_dict(torch.load(model_path, weights_only=True))
+        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=torch.device('cpu')))
         self.model.eval()
 
     def act(self, input_state: dict):

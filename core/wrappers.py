@@ -489,7 +489,7 @@ class StuckObservations(Wrapper):
         self.time_since_stuck = 0.0
         self.observation_space['time_since_stuck'] = Box(
             low=0.0,
-            high=float('inf'),
+            high=5.0,
             shape=(),
             dtype=np.float32,
         )
@@ -539,7 +539,10 @@ class StuckObservations(Wrapper):
         path_start = observation['paths_start'][0]
         path_end = observation['paths_end'][0]
         path_width = observation['paths_width'][0][0]
-        a = (path_end[1] - path_start[1]) / (path_end[2] - path_start[2])
+        dy = path_end[1] - path_start[1]
+        dz = path_end[2] - path_start[2]
+        dz = max(dz, 0.01) if dz >= 0 else min(dz, -0.01)  # Prevent division by zero
+        a = dy / dz
         b = path_start[1] - a * path_start[2]
         distance_above_track = abs(min(b, 0)) - ExpertAgent.KART_HEIGHT / 2.0
         if not self.is_being_rescued:  # If not already being rescued, check conditions to become rescued
@@ -589,6 +592,50 @@ class ExpertObservations(Wrapper):
         super().__init__(env)
         self.avoid_bad_items = avoid_bad_items
         self.avoid_karts = avoid_karts
+        self.observation_space = deepcopy(env.observation_space)
+        # Track direction
+        self.observation_space['track_direction'] = Discrete(
+            n=len(DirectionType)
+        )
+        # Speed to radius ratio
+        self.observation_space['speed_radius_ratio'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        # Target position
+        self.observation_space['target_position'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(3,),
+            dtype=np.float32,
+        )
+        # Curve duration
+        self.observation_space['curve_duration'] = Box(
+            low=0.0,
+            high=5.0,
+            shape=(),
+            dtype=np.float32,
+        )
+        # Avoid obstacle
+        self.observation_space['avoid_obstacle'] = Discrete(
+            n=2,
+        )
+        # Obstacle position
+        self.observation_space['obstacle_position'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(3,),
+            dtype=np.float32,
+        )
+        # Obstacle velocity
+        self.observation_space['obstacle_velocity'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(3,),
+            dtype=np.float32,
+        )
 
     def get_new_observation(self, observation):
         """Get a new observation with expert observations added.
@@ -605,7 +652,7 @@ class ExpertObservations(Wrapper):
         # Get kart speed
         kart_speed = np.linalg.norm(observation['velocity']).item()
         # Get speed ratio to curve radius (this will enable deciding whether to brake or not)
-        speed_radius_ratio = kart_speed / curve_radius if curve_radius is not None else -1.0
+        speed_radius_ratio = kart_speed / curve_radius if curve_radius is not None else 0.0
         # Get target position
         if observation['stuck']:
             # If stuck, target the next path start
@@ -625,18 +672,19 @@ class ExpertObservations(Wrapper):
         else:  # If the track direction is undefined
             curve_length = None
         # Duration to complete the curve at current speed and clamped to 5 seconds max
-        curve_duration = min(curve_length / kart_speed if (curve_length is not None and kart_speed > 0) else -1.0, 5.0)
+        curve_duration = min(curve_length / kart_speed if ((curve_length is not None) and (kart_speed > 0)) else 0.0, 5.0)
         # Get items ahead
         items_to_collect, items_to_avoid = self.__get_items_ahead(observation)
         # Get obstacles ahead
-        avoid_obstacle, obstacle_position = self.__get_obstacle_info(observation, target_position, items_to_collect, items_to_avoid)
+        avoid_obstacle, obstacle_position, observation_velocity = self.__get_obstacle_info(observation, target_position, items_to_collect, items_to_avoid)
         # Add to observation
         observation['track_direction'] = direction_type.value
         observation['speed_radius_ratio'] = speed_radius_ratio
         observation['target_position'] = target_position
         observation['curve_duration'] = curve_duration
         observation['avoid_obstacle'] = int(avoid_obstacle)
-        observation['obstacle_position'] = obstacle_position if obstacle_position is not None else np.full((3,), -1.0)
+        observation['obstacle_position'] = obstacle_position if obstacle_position is not None else np.full((3,), 0.0)
+        observation['obstacle_velocity'] = observation_velocity if observation_velocity is not None else np.full((3,), 0.0)
         # Return the new observation
         return observation
 
@@ -884,7 +932,7 @@ class ExpertObservations(Wrapper):
         # Get current speed
         speed = np.linalg.norm(observation['velocity'])
         # 1) If there are items to avoid, and we are going towards them, avoid them
-        if self.avoid_bad_items and len(items_to_avoid) > 0:
+        if self.avoid_bad_items and (len(items_to_avoid) > 0) and (speed > 0):
             for (item_id, path_id) in items_to_avoid:
                 item_to_avoid_position = observation['items_position'][item_id]
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), item_to_avoid_position)
@@ -894,7 +942,7 @@ class ExpertObservations(Wrapper):
                     nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.unwrapped.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Return that we need to avoid this item and the new target point
-                        return True, item_to_avoid_position
+                        return True, item_to_avoid_position, np.array([0.0, 0.0, 0.0])
         # 2) If there are karts that may collide with us, avoid them
         # But if our kart has a bomb attached to it, we won't try to avoid other karts
         # as we may want to hit them on purpose to pass the bomb to them
@@ -913,9 +961,9 @@ class ExpertObservations(Wrapper):
                     nb_steps_to_reach = ((dist_to_kart - ExpertAgent.KART_LENGTH) / relative_speed) / self.env.unwrapped.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Return that we need to avoid this kart and the new target point
-                        return True, kart_position
+                        return True, kart_position, observation['karts_velocity'][i]
         # Else we don't need to avoid anything
-        return False, None
+        return False, None, None
 
     def __check_if_pos_in_path(self, observation, position: np.ndarray, path_id: int):
         """Checks if a given position is within the path segment.
@@ -1000,7 +1048,7 @@ class CustomPolarObservations(ObservationWrapper):
     #: Keys to transform (batch)
     KEYS = ["items_position", "karts_position", "paths_start", "paths_end", "karts_velocity"]
     #: Keys to transform (single)
-    SIMPLE_KEYS = ["target_position", "obstacle_position", "center_path", "velocity"]
+    SIMPLE_KEYS = ["target_position", "obstacle_position", "center_path", "velocity", "obstacle_velocity"]
 
     def __init__(self, env: Env, **kwargs):
         super().__init__(env, **kwargs)

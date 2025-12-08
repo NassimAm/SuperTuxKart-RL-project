@@ -125,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--difficulty",
         type=int,
-        default=3,
+        default=2,
         help="Difficulty level of the STK Bot.",
     )
     args = parser.parse_args()
