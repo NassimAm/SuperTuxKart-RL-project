@@ -489,7 +489,7 @@ class StuckObservations(Wrapper):
         self.time_since_stuck = 0.0
         self.observation_space['time_since_stuck'] = Box(
             low=0.0,
-            high=float('inf'),
+            high=5.0,
             shape=(),
             dtype=np.float32,
         )
@@ -589,6 +589,43 @@ class ExpertObservations(Wrapper):
         super().__init__(env)
         self.avoid_bad_items = avoid_bad_items
         self.avoid_karts = avoid_karts
+        self.observation_space = deepcopy(env.observation_space)
+        # Track direction
+        self.observation_space['track_direction'] = Discrete(
+            n=len(DirectionType)
+        )
+        # Speed to radius ratio
+        self.observation_space['speed_radius_ratio'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        # Target position
+        self.observation_space['target_position'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(3,),
+            dtype=np.float32,
+        )
+        # Curve duration
+        self.observation_space['curve_duration'] = Box(
+            low=0.0,
+            high=5.0,
+            shape=(),
+            dtype=np.float32,
+        )
+        # Avoid obstacle
+        self.observation_space['avoid_obstacle'] = Discrete(
+            n=2,
+        )
+        # Obstacle position
+        self.observation_space['obstacle_position'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(3,),
+            dtype=np.float32,
+        )
 
     def get_new_observation(self, observation):
         """Get a new observation with expert observations added.
@@ -605,7 +642,7 @@ class ExpertObservations(Wrapper):
         # Get kart speed
         kart_speed = np.linalg.norm(observation['velocity']).item()
         # Get speed ratio to curve radius (this will enable deciding whether to brake or not)
-        speed_radius_ratio = kart_speed / curve_radius if curve_radius is not None else -1.0
+        speed_radius_ratio = kart_speed / curve_radius if curve_radius is not None else 0.0
         # Get target position
         if observation['stuck']:
             # If stuck, target the next path start
@@ -884,7 +921,7 @@ class ExpertObservations(Wrapper):
         # Get current speed
         speed = np.linalg.norm(observation['velocity'])
         # 1) If there are items to avoid, and we are going towards them, avoid them
-        if self.avoid_bad_items and len(items_to_avoid) > 0:
+        if self.avoid_bad_items and (len(items_to_avoid) > 0) and (speed > 0):
             for (item_id, path_id) in items_to_avoid:
                 item_to_avoid_position = observation['items_position'][item_id]
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), item_to_avoid_position)

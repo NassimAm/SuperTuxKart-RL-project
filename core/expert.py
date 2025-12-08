@@ -727,7 +727,7 @@ class ExpertAgent:
         # Get current speed
         speed = state['velocity'][2]
         # 1) If there are items to avoid, and we are going towards them, avoid them
-        if self.avoid_bad_items and len(items_to_avoid) > 0:
+        if self.avoid_bad_items and (len(items_to_avoid) > 0) and (speed > 0):
             for (item_id, path_id) in items_to_avoid:
                 item_to_avoid_position = from_polar_to_cartesian(state['items_position'][item_id])
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), item_to_avoid_position)
