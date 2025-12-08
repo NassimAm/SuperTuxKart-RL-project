@@ -49,7 +49,7 @@ class ExpertAgent:
     ZIPPER_MAX_SPEED_INCREASE = 15.0  # m/s
     # skidding
     # SKID_BONUS_SPEED = [4.5, 6.5]  # m/s
-    SKID_TIME_TILL_BONUS = [1.0, 3.0]
+    SKID_TIME_TILL_BONUS = [1.3, 3.3]
     SKID_REDUCE_TURN_MIN = 0.2
     SKID_REDUCE_TURN_MAX = 0.8
     SKID_MIN_SPEED = 10  # m/s
@@ -319,14 +319,14 @@ class ExpertAgent:
         target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Handle item collection and avoidance
         items_to_collect, items_to_avoid = self.__get_items_ahead(state)
-        target_position = self.__handle_collection_and_avoidance(state, target_position, items_to_collect, items_to_avoid)
+        should_avoid, target_position = self.__handle_collection_and_avoidance(state, target_position, items_to_collect, items_to_avoid)
         # Handle item usage
         if self.use_items:
             self.__handle_items(state, action, items_to_collect, items_to_avoid)
         # Compute the required steer to reach the target point
         steer_angle = self.__steer_to_point(target_position)
         # Set the steering action
-        self.__set_steering(state, action, steer_angle, track_direction, last_path_id, curve_center, curve_radius)
+        self.__set_steering(state, action, steer_angle, track_direction, last_path_id, curve_center, curve_radius, should_avoid)
 
     def __handle_rescue(self, state: State, action: Action):
         """Handles rescue logic based on the current state.
@@ -349,7 +349,7 @@ class ExpertAgent:
         action['acceleration'] = 1.0
         target_position = from_polar_to_cartesian(state['paths_start'][1])
         steer_angle = self.__steer_to_point(target_position)
-        self.__set_steering(state, action, steer_angle, DirectionType.DIR_UNDEFINED, None, None, None)
+        self.__set_steering(state, action, steer_angle, DirectionType.DIR_UNDEFINED, None, None, None, False)
 
     def __get_target_path_id(self, state: State):
         """Returns the target path ID based on the current state.
@@ -732,7 +732,7 @@ class ExpertAgent:
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), item_to_avoid_position)
                 if abs(angle) < 0.3:
                     dist_to_item = np.linalg.norm(item_to_avoid_position).item()
-                    nb_max_steps = 4
+                    nb_max_steps = 4 if state['skid_direction'] == 0 else 6  # give more time to avoid if drifting
                     nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Compute two possible avoidance target points aside the item (left and right)
@@ -742,9 +742,9 @@ class ExpertAgent:
                         angle1 = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), avoid_target_point_1)
                         angle2 = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), avoid_target_point_2)
                         if abs(angle1) < abs(angle2):
-                            return avoid_target_point_1
+                            return True, avoid_target_point_1
                         else:
-                            return avoid_target_point_2
+                            return True, avoid_target_point_2
         # 2) If there are karts that may collide with us, avoid them
         # But if our kart has a bomb attached to it, we won't try to avoid other karts
         # as we may want to hit them on purpose to pass the bomb to them
@@ -760,7 +760,7 @@ class ExpertAgent:
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), kart_position)
                 if abs(angle) < 0.3:
                     dist_to_kart = np.linalg.norm(kart_position).item()
-                    nb_max_steps = 4
+                    nb_max_steps = 4 if state['skid_direction'] == 0 else 6  # give more time to avoid if drifting
                     nb_steps_to_reach = ((dist_to_kart - ExpertAgent.KART_LENGTH) / relative_speed) / self.env.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Compute two possible avoidance target points aside the kart (left and right)
@@ -770,24 +770,24 @@ class ExpertAgent:
                         angle1 = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), avoid_target_point_1)
                         angle2 = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), avoid_target_point_2)
                         if abs(angle1) < abs(angle2):
-                            return avoid_target_point_1
+                            return True, avoid_target_point_1
                         else:
-                            return avoid_target_point_2
+                            return True, avoid_target_point_2
         # 3) If there's nothing to avoid, try to collect bonuses if close enough
         # TODO: this logic is still experimental and must be improved
         if self.collect_items and (len(items_to_collect) > 0) and (speed > 0):
             for (item_id, path_id) in items_to_collect:
                 item_to_collect_position = from_polar_to_cartesian(state['items_position'][item_id])
                 if abs(item_to_collect_position[0]) < 2.0:
-                    return target_point  # already aligned, no need to adjust
+                    return False, target_point  # already aligned, no need to adjust
                 else:
                     dist_to_item = np.linalg.norm(item_to_collect_position).item()
-                    nb_max_steps = 4
+                    nb_max_steps = 4 if state['skid_direction'] == 0 else 6  # give more time to collect if drifting
                     nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
-                        return item_to_collect_position + np.array([2.0, 0.0, 0.0]) * np.sign(item_to_collect_position[0])
+                        return True, item_to_collect_position + np.array([2.0, 0.0, 0.0]) * np.sign(item_to_collect_position[0])
         # Return the new target point
-        return target_point
+        return False, target_point
 
     def __steer_to_point(self, target_point: np.ndarray):
         """Calculates the steer angle needed to steer towards a target point.
@@ -816,7 +816,7 @@ class ExpertAgent:
         return steer_angle
 
     def __set_steering(self, state: State, action: Action, steer_angle: float, track_direction: DirectionType,
-                       last_path_id: Optional[int], curve_center: Optional[np.ndarray], curve_radius: Optional[float]):
+                       last_path_id: Optional[int], curve_center: Optional[np.ndarray], curve_radius: Optional[float], should_avoid: bool):
         """Sets the steering action based on the steer angle.
 
         Args:
@@ -827,12 +827,13 @@ class ExpertAgent:
             last_path_id (Optional[int]): The index of the last path segment considered.
             curve_center (Optional[np.ndarray]): The center of the turn (as a 3D point).
             curve_radius (Optional[float]): The radius of the turn.
+            should_avoid (bool): Whether the kart should avoid an obstacle.
         """
         # Calculate the steer fraction
         steer_fraction = steer_angle / state['max_steer_angle']
         # If drifting is enabled, determine if we can drift
         if self.enable_drift and (not state['stuck']):
-            can_drift = self.__can_drift(state, steer_fraction, track_direction, last_path_id, curve_center, curve_radius)
+            can_drift = self.__can_drift(state, steer_fraction, track_direction, last_path_id, curve_center, curve_radius, should_avoid)
             action['drift'] = can_drift
             # If we are drifting, adjust the steering accordingly
             if can_drift and state['skid_direction'] != 0:
@@ -945,7 +946,7 @@ class ExpertAgent:
         return curve_center, curve_radius
 
     def __can_drift(self, state: State, steer_fraction: float, track_direction: DirectionType,
-                    last_path_id: Optional[int], curve_center: Optional[np.ndarray], curve_radius: Optional[float]):
+                    last_path_id: Optional[int], curve_center: Optional[np.ndarray], curve_radius: Optional[float], should_avoid: bool):
         """Determines if the kart can perform a drift based on its current speed and track conditions.
 
         Args:
@@ -959,20 +960,23 @@ class ExpertAgent:
         Returns:
             bool: True if the kart can drift, False otherwise.
         """
-        # 1) Track changes
+        # 1) Avoidance condition
+        if should_avoid:
+            return False
+        # 2) Track changes
         # If the track is straight or undefined, we cannot drift
         if (track_direction == DirectionType.DIR_STRAIGHT) or (track_direction == DirectionType.DIR_UNDEFINED):
             return False
         # If the kart is already skidding, and the track changed direction, we cannot drift
         if ((state['skid_direction'] == 1) and (track_direction == DirectionType.DIR_LEFT)) or ((state['skid_direction'] == -1) and (track_direction == DirectionType.DIR_RIGHT)):
             return False
-        # 2) Speed condition
+        # 3) Speed condition
         # Get current speed
         speed = state['velocity'][2]
         # Only try to drift if we are above the minimum speed
         if speed < ExpertAgent.SKID_MIN_SPEED:
             return False
-        # 3) Conditions to continue drifting
+        # 4) Conditions to continue drifting
         # Estimate how long it takes to finish the curve
         assert (last_path_id is not None) and (curve_center is not None) and (curve_radius is not None), "last_path_id, curve_center and curve_radius should not be None here"
         last_path_center = (from_polar_to_cartesian(state['paths_start'][last_path_id]) + from_polar_to_cartesian(state['paths_end'][last_path_id])) / 2.0
@@ -984,16 +988,19 @@ class ExpertAgent:
         # If we are already drifting, continue to drift until we reached a little bit before the end of the curve
         already_drifting = state['prev_actions'][-1]['drift'] and (state['skid_direction'] != 0)
         if already_drifting and (duration > 0.5):
-            # And check if the steer fraction is whithin the allowed range
+            # If we are already drifting and we reached the full bonus time, we can stop drifting
+            if state['time_since_skid_start'] >= ExpertAgent.SKID_TIME_TILL_BONUS[1]:
+                return False
+            # Otherwise, check if the steer fraction is whithin the allowed range
             if state['skid_direction'] == 1:  # drifting right
-                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN - 0.1:
                     return False
             else:  # drifting left
-                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN + 0.1:
                     return False
             # else we can continue drifting
             return True
-        # 4) Conditions to start drifting
+        # 5) Conditions to start drifting
         # We want to start drifting so we check if we are steering left in a right curve or steering right in a left curve, if it's the case we cannot drift
         if ((steer_fraction > 0) and (track_direction == DirectionType.DIR_LEFT)) or ((steer_fraction < 0) and (track_direction == DirectionType.DIR_RIGHT)):
             return False
@@ -1002,10 +1009,10 @@ class ExpertAgent:
         if should_drift:
             # Finally check if the steer fraction is whithin the allowed range
             if track_direction == DirectionType.DIR_RIGHT:
-                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN - 0.1:
                     return False
             else:  # track_direction == DirectionType.DIR_LEFT
-                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN + 0.1:
                     return False
             # else we can drift
             return True
