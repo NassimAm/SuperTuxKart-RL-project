@@ -539,7 +539,10 @@ class StuckObservations(Wrapper):
         path_start = observation['paths_start'][0]
         path_end = observation['paths_end'][0]
         path_width = observation['paths_width'][0][0]
-        a = (path_end[1] - path_start[1]) / (path_end[2] - path_start[2])
+        dy = path_end[1] - path_start[1]
+        dz = path_end[2] - path_start[2]
+        dz = max(dz, 0.01) if dz >= 0 else min(dz, -0.01)  # Prevent division by zero
+        a = dy / dz
         b = path_start[1] - a * path_start[2]
         distance_above_track = abs(min(b, 0)) - ExpertAgent.KART_HEIGHT / 2.0
         if not self.is_being_rescued:  # If not already being rescued, check conditions to become rescued
@@ -669,7 +672,7 @@ class ExpertObservations(Wrapper):
         else:  # If the track direction is undefined
             curve_length = None
         # Duration to complete the curve at current speed and clamped to 5 seconds max
-        curve_duration = min(curve_length / kart_speed if (curve_length is not None and kart_speed > 0) else 0.0, 5.0)
+        curve_duration = min(curve_length / kart_speed if ((curve_length is not None) and (kart_speed > 0)) else 0.0, 5.0)
         # Get items ahead
         items_to_collect, items_to_avoid = self.__get_items_ahead(observation)
         # Get obstacles ahead

@@ -541,7 +541,7 @@ class ExpertAgent:
         # Use shield if kart is going to hit an item box
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_collect) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_collect[0][0]]))
-            if (state['items_type'][items_to_collect[0][0]] == ItemType.BONUS_BOX) and (((d - ExpertAgent.KART_LENGTH / 2.0 - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
+            if (state['items_type'][items_to_collect[0][0]] == ItemType.BONUS_BOX) and (speed > 0) and (((d - ExpertAgent.KART_LENGTH / 2.0 - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
                 action['fire'] = True
                 return
         # Use bubblegum if the any kart behind is 'close' and straight behind
@@ -669,7 +669,7 @@ class ExpertAgent:
                     angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), pos)
                     # If we would reach the item soon (within 4 steps), use the switch
                     dist_to_item = np.linalg.norm(pos).item()
-                    if (abs(angle) < 0.3) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 4):
+                    if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 4):
                         action['fire'] = True
                         return
 
@@ -696,7 +696,7 @@ class ExpertAgent:
                 pos = from_polar_to_cartesian(state['items_position'][item_id])
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), pos)
                 dist_to_item = np.linalg.norm(pos).item()
-                if (abs(angle) < 0.3) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 3):
+                if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 3):
                     has_bonus_box_ahead = True
                     break
         if has_bonus_box_ahead or ((attachment == Attachment.BOMB) and (state['attachment_time_left'] < 10.0)):
