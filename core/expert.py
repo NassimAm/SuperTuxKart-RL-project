@@ -24,6 +24,8 @@ class ExpertAgent:
     """Whether to use nitro boosts."""
     use_items: bool
     """Whether to use items on the track."""
+    collect_items: bool
+    """Whether to collect items on the track."""
     max_speed: float
     """The maximum speed of the kart based on difficulty level."""
 
@@ -82,7 +84,7 @@ class ExpertAgent:
 
     def __init__(self, env: Env, enable_drift: bool = True,
                  avoid_bad_items: bool = True, avoid_karts: bool = True,
-                 use_nitro: bool = True, use_items: bool = True):
+                 use_nitro: bool = True, use_items: bool = True, collect_items: bool = False):
         """Initializes the ExpertAgent.
 
         Args:
@@ -99,6 +101,7 @@ class ExpertAgent:
         self.avoid_karts = avoid_karts
         self.use_nitro = use_nitro
         self.use_items = use_items
+        self.collect_items = collect_items
 
     def act(self, state: dict):
         """Determines the action to take based on the current state.
@@ -256,7 +259,7 @@ class ExpertAgent:
         if (state['attachment'] == Attachment.BOMB) and (energy_reserve > 0):
             karts_rel_rank = state['karts_rel_rank']
             kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
-            if ((kart_ahead_id is not None) and (state['karts_distance'][kart_ahead_id] > 10.0)) or (state['karts_velocity'][kart_ahead_id][2] > speed):
+            if (kart_ahead_id is not None) and ((state['karts_distance'][kart_ahead_id] > 10.0) or (state['karts_velocity'][kart_ahead_id][2] > speed)):
                 energy_reserve = 0
         # Don't use nitro if building an energy reserve
         if state['energy'] <= energy_reserve:
@@ -477,7 +480,7 @@ class ExpertAgent:
         # If we don't have a powerup, nothing to do
         if state['powerup'] == Powerup.NOTHING:
             return
-        # Get kart ahead and behind IDs
+        # Get kart ahead ID
         karts_rel_rank = state['karts_rel_rank']
         kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
         # Treat each powerup type accordingly
@@ -566,22 +569,20 @@ class ExpertAgent:
                 continue  # only consider karts ahead
             kart_ahead_id = kart_id
             # Do not fire if the target is too far
-            kart_ahead_is_close = (state['karts_distance'][kart_ahead_id] < 20.0) if kart_ahead_id is not None else False
-            kart_ahead_has_gum = False
+            kart_ahead_is_close = (state['karts_distance'][kart_ahead_id] < 20.0)
             straight_ahead = False
             rather_ahead = False  # used to not fire in big curves
 
-            if kart_ahead_id is not None:
-                kart_ahead_has_gum = (state['karts_attachment'][kart_ahead_id] == Attachment.BUBBLEGUM_SHIELD)
-                kart_ahead_position = from_polar_to_cartesian(state['karts_position'][kart_ahead_id])
-                angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), kart_ahead_position)
-                if abs(angle) < 0.2:
-                    straight_ahead = True
-                if abs(angle) < 0.5:
-                    rather_ahead = True
+            kart_ahead_has_gum = (state['karts_attachment'][kart_ahead_id] == Attachment.BUBBLEGUM_SHIELD)
+            kart_ahead_position = from_polar_to_cartesian(state['karts_position'][kart_ahead_id])
+            angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), kart_ahead_position)
+            if abs(angle) < 0.2:
+                straight_ahead = True
+            if abs(angle) < 0.5:
+                rather_ahead = True
             # Do not fire if the kart is driving too slow
             speed = state['velocity'][2]
-            kart_ahead_is_slow = (kart_ahead_id is not None) and (state['karts_velocity'][kart_ahead_id][2] < speed)
+            kart_ahead_is_slow = (state['karts_velocity'][kart_ahead_id][2] < speed)
             # Establish if we should fire
             fire_ahead = 0.0
             if kart_ahead_is_close and rather_ahead:
@@ -598,9 +599,7 @@ class ExpertAgent:
             else:
                 fire_ahead += 25.0
             # Try to take out a kart which has a swatter in priority
-            kart_ahead_has_swatter = False
-            if kart_ahead_id is not None:
-                kart_ahead_has_swatter = (state['karts_attachment'][kart_ahead_id] == Attachment.SWATTER)
+            kart_ahead_has_swatter = (state['karts_attachment'][kart_ahead_id] == Attachment.SWATTER)
             # If it is slower, the swatter is more dangerous
             if kart_ahead_has_swatter:
                 if kart_ahead_is_slow:
@@ -774,6 +773,19 @@ class ExpertAgent:
                             return avoid_target_point_1
                         else:
                             return avoid_target_point_2
+        # 3) If there's nothing to avoid, try to collect bonuses if close enough
+        # TODO: this logic is still experimental and must be improved
+        if self.collect_items and (len(items_to_collect) > 0) and (speed > 0):
+            for (item_id, path_id) in items_to_collect:
+                item_to_collect_position = from_polar_to_cartesian(state['items_position'][item_id])
+                if abs(item_to_collect_position[0]) < 2.0:
+                    return target_point  # already aligned, no need to adjust
+                else:
+                    dist_to_item = np.linalg.norm(item_to_collect_position).item()
+                    nb_max_steps = 4
+                    nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.config.step_size
+                    if nb_steps_to_reach < nb_max_steps:
+                        return item_to_collect_position + np.array([2.0, 0.0, 0.0]) * np.sign(item_to_collect_position[0])
         # Return the new target point
         return target_point
 
