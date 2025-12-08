@@ -1018,6 +1018,8 @@ class ExpertAgent:
         Returns:
             float: The adjusted steering value for drifting.
         """
+        if state['prev_skid_direction'] == 0:
+            return steering  # no adjustment on the first frame of drifting
         delta = ExpertAgent.SKID_REDUCE_TURN_MAX - ExpertAgent.SKID_REDUCE_TURN_MIN
         if state['skid_direction'] == 0:  # not skidding
             return steering

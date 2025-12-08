@@ -181,6 +181,13 @@ class EnhanceObservations(Wrapper):
             shape=(),
             dtype=np.int32,
         )
+        self.prev_skid_direction = 0
+        self.observation_space['prev_skid_direction'] = Box(
+            low=-1,
+            high=1,
+            shape=(),
+            dtype=np.int32,
+        )
         # Add time since skidding started
         self.time_since_skid_start = 0.0
         self.observation_space['time_since_skid_start'] = Box(
@@ -398,9 +405,12 @@ class EnhanceObservations(Wrapper):
         # Add skid direction and time since last fire
         if reset or (action is None):
             self.skid_direction = 0
+            self.prev_skid_direction = 0
             self.time_since_skid_start = 0.0
             self.time_since_last_fire = 0.0
         elif action is not None:
+            # Save previous skid direction
+            self.prev_skid_direction = self.skid_direction
             # Drifting logic
             if not action['drift']:
                 self.skid_direction = 0
@@ -421,6 +431,7 @@ class EnhanceObservations(Wrapper):
                 self.time_since_last_fire = min(self.time_since_last_fire, ExpertAgent.MAX_TIME_SINCE_LAST_FIRE)
         # Set in observation
         observation['skid_direction'] = self.skid_direction
+        observation['prev_skid_direction'] = self.prev_skid_direction
         observation['time_since_skid_start'] = self.time_since_skid_start
         observation['time_since_last_fire'] = self.time_since_last_fire
         # Add previous actions

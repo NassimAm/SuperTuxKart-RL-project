@@ -209,6 +209,8 @@ class State(TypedDict):
     """Time left for zipper fadeout effect."""
     skid_direction: int
     """Direction of the skid: -1 for left, 1 for right, 0 for no skid."""
+    prev_skid_direction: int
+    """Previous direction of the skid: -1 for left, 1 for right, 0 for no skid."""
     time_since_last_fire: float
     """Time since the last fire action."""
     prev_actions: list[Action]
@@ -278,6 +280,7 @@ class State(TypedDict):
             zipper_duration_time_left=state['zipper_duration_time_left'],
             zipper_fadeout_time_left=state['zipper_fadeout_time_left'],
             skid_direction=state['skid_direction'],
+            prev_skid_direction=state['prev_skid_direction'],
             time_since_skid_start=state['time_since_skid_start'],
             time_since_last_fire=state['time_since_last_fire'],
             track_direction=DirectionType(state['track_direction']),
@@ -333,6 +336,7 @@ class State(TypedDict):
             'zipper_duration_time_left': state['zipper_duration_time_left'],
             'zipper_fadeout_time_left': state['zipper_fadeout_time_left'],
             'skid_direction': state['skid_direction'],
+            'prev_skid_direction': state['prev_skid_direction'],
             'time_since_skid_start': state['time_since_skid_start'],
             'time_since_last_fire': state['time_since_last_fire'],
             'track_direction': state['track_direction'].value,
@@ -384,6 +388,7 @@ class State(TypedDict):
             torch.tensor(state['track_direction'].encode(), dtype=torch.float32),
             torch.tensor([state['curve_duration']], dtype=torch.float32),
             torch.tensor([state['skid_direction']], dtype=torch.float32),
+            torch.tensor([state['prev_skid_direction']], dtype=torch.float32),
             torch.tensor([state['skeed_factor']], dtype=torch.float32),
             # Powerup
             torch.tensor(state['powerup'].encode(), dtype=torch.float32),
