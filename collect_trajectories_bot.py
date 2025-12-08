@@ -55,7 +55,7 @@ def collect_trajectories(data_path: str, difficulty: int = 3):
         truncateds.append(truncated)
 
         # Save locally every 10000 steps
-        if i % 10000 == 0 and i > 0:
+        if i % 100000 == 0 and i > 0:
             state_array = np.concat([State.to_model(State.from_env(s), previous_action_horizon=previous_action_horizon).numpy().reshape(1, -1) for s in states])
             actions_array = np.concat([Action.to_model(Action.from_env(a)).numpy().reshape(1, -1) for a in actions])
             rewards_array = np.array(rewards)
@@ -68,7 +68,15 @@ def collect_trajectories(data_path: str, difficulty: int = 3):
                 'terminated': terminateds_array,
                 'truncated': truncateds_array
             }
-            np.savez_compressed(data_path, **data)
+            # Save data to a compressed .npz file with a step-based suffix
+            path_without_extension, extension = data_path.split('.', 1)
+            np.savez_compressed(f"{path_without_extension}_{i // 100000}.{extension}", **data)
+            # Clear stored data after saving
+            states.clear()
+            actions.clear()
+            rewards.clear()
+            terminateds.clear()
+            truncateds.clear()
 
         # If done, reset the environment
         if done:

@@ -663,7 +663,7 @@ class ExpertObservations(Wrapper):
         # Get kart speed
         kart_speed = np.linalg.norm(observation['velocity']).item()
         # Get speed ratio to curve radius (this will enable deciding whether to brake or not)
-        speed_radius_ratio = kart_speed / curve_radius if curve_radius is not None else 0.0
+        speed_radius_ratio = kart_speed / curve_radius if (curve_radius is not None) and (curve_radius != 0) else 0.0
         # Get target position
         if observation['stuck']:
             # If stuck, target the next path start
@@ -801,7 +801,7 @@ class ExpertObservations(Wrapper):
         line1_a = (q1[2] - mid[2]) / (q1[0] - mid[0]) if (q1[0] - mid[0]) != 0 else None
         line1_b = mid[2] - line1_a * mid[0] if line1_a is not None else None
         # Compute line intersection with x axis
-        if line1_a is not None:
+        if (line1_a is not None) and (line1_a != 0):
             # If there is an intersection, calculate its coordinates
             intersect_x = (-line1_b) / line1_a
             intersect_z = line1_a * intersect_x + line1_b

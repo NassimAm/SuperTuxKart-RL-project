@@ -804,6 +804,11 @@ class ExpertAgent:
         # where r is the radius (= position on the X axis), and x, z are the
         # local coordinates of the point to aim at. Solving for r
         # results in r = (x**2 + y**2) / (2 * x)
+
+        # Catch edge case where target_point[0] is zero to avoid division by zero
+        if target_point[0] == 0:
+            return 0.0
+        # Otherwise
         radius = (target_point[0] * target_point[0] + target_point[2] * target_point[2]) / (2.0 * target_point[0])
         # Compute steer angle
         steer_angle = np.atan(ExpertAgent.WHEEL_BASE / radius).item()
@@ -925,7 +930,7 @@ class ExpertAgent:
         line1_a = (q1[2] - mid[2]) / (q1[0] - mid[0]) if (q1[0] - mid[0]) != 0 else None
         line1_b = mid[2] - line1_a * mid[0] if line1_a is not None else None
         # Compute line intersection with x axis
-        if line1_a is not None:
+        if (line1_a is not None) and (line1_a != 0):
             # If there is an intersection, calculate its coordinates
             intersect_x = (-line1_b) / line1_a
             intersect_z = line1_a * intersect_x + line1_b
