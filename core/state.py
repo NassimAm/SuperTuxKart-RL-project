@@ -232,6 +232,8 @@ class State(TypedDict):
     """Indicates if the kart should avoid an obstacle."""
     obstacle_position: np.ndarray
     """Position of the obstacle to avoid."""
+    obstacle_velocity: np.ndarray
+    """Velocity of the obstacle to avoid."""
 
     def from_env(state: dict) -> 'State':
         """Create a State from a flattened array representation."""
@@ -284,6 +286,7 @@ class State(TypedDict):
             curve_duration=state['curve_duration'],
             avoid_obstacle=bool(state['avoid_obstacle']),
             obstacle_position=state['obstacle_position'],
+            obstacle_velocity=state['obstacle_velocity'],
             prev_actions=[Action.from_env(a) for a in state['prev_actions']]
         )
 
@@ -338,6 +341,7 @@ class State(TypedDict):
             'curve_duration': state['curve_duration'],
             'avoid_obstacle': int(state['avoid_obstacle']),
             'obstacle_position': state['obstacle_position'],
+            'obstacle_velocity': state['obstacle_velocity'],
             'prev_actions': [Action.to_env(a) for a in state['prev_actions']]
         }
 
@@ -373,6 +377,7 @@ class State(TypedDict):
             # Important data for avoiding obstacles
             torch.tensor([int(state['avoid_obstacle'])], dtype=torch.float32),
             torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),  # clip?
+            torch.tensor(state['obstacle_velocity'].reshape(-1), dtype=torch.float32),
             # Important data for braking
             torch.tensor([state['speed_radius_ratio']], dtype=torch.float32),
             # Important data for drifting
