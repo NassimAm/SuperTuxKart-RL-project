@@ -1,3 +1,4 @@
+import math
 from core.state import State, Phase, Attachment, Powerup, ItemType, DirectionType
 from core.action import Action
 from core.utils import from_polar_to_cartesian, get_xz_angle_between
@@ -26,7 +27,9 @@ class ExpertAgent:
     """Whether to use items on the track."""
     max_speed: float
     """The maximum speed of the kart based on difficulty level."""
-
+    path_decision_angle: int = 45 # degrees
+    """The angle threshold for path decision-making."""
+    
     # ============================== Path characteristics ==============================
     MAX_STRAIGHT_ANGLE = 0.1  # radians
     # ============================== Kart characteristics ==============================
@@ -80,9 +83,11 @@ class ExpertAgent:
     # firing
     MAX_TIME_SINCE_LAST_FIRE = 5.0  # seconds
 
+    
+
     def __init__(self, env: Env, enable_drift: bool = True,
                  avoid_bad_items: bool = True, avoid_karts: bool = True,
-                 use_nitro: bool = True, use_items: bool = True):
+                 use_nitro: bool = True, use_items: bool = True, path_decision_angle: int = 45):
         """Initializes the ExpertAgent.
 
         Args:
@@ -99,6 +104,7 @@ class ExpertAgent:
         self.avoid_karts = avoid_karts
         self.use_nitro = use_nitro
         self.use_items = use_items
+        self.path_decision_angle = path_decision_angle
 
     def act(self, state: dict):
         """Determines the action to take based on the current state.
@@ -256,6 +262,14 @@ class ExpertAgent:
         if (state['attachment'] == Attachment.BOMB) and (energy_reserve > 0):
             karts_rel_rank = state['karts_rel_rank']
             kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
+            if  len(state['karts_velocity'][kart_ahead_id]) < 3:
+                print("Warning: kart_ahead velocity data is missing or incomplete.")
+                print(kart_ahead_id, state['karts_velocity'])
+                #pint position of that kart
+                print(from_polar_to_cartesian(state['karts_position'][kart_ahead_id]))
+                # print current kart rank
+                print("Current kart rank:", state['rank'])
+               
             if ((kart_ahead_id is not None) and (state['karts_distance'][kart_ahead_id] > 10.0)) or (state['karts_velocity'][kart_ahead_id][2] > speed):
                 energy_reserve = 0
         # Don't use nitro if building an energy reserve
@@ -395,7 +409,7 @@ class ExpertAgent:
             next_path_center = (from_polar_to_cartesian(state['paths_start'][path_id + 1]) + from_polar_to_cartesian(state['paths_end'][path_id + 1])) / 2.0
             # If the center of the next path segment is outside the target angle range, or the angle range got too narrow (less than 45 degrees), stop here
             angle_to_next_path = get_xz_angle_between(current_path_dir, next_path_center)
-            if (target_angle_max - target_angle_min < 0.785) or (angle_to_next_path <= target_angle_min) or (angle_to_next_path >= target_angle_max):
+            if (target_angle_max - target_angle_min < math.radians(self.path_decision_angle)) or (angle_to_next_path <= target_angle_min) or (angle_to_next_path >= target_angle_max):
                 return target_path_id
             # Otherwise, update the target path ID
             target_path_id = path_id + 1
