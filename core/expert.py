@@ -535,7 +535,7 @@ class ExpertAgent:
         speed = state['velocity'][2]
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_avoid) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_avoid[0][0]]))
-            if ((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5:
+            if (speed > 0) and (((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
                 action['fire'] = True
                 return
         # Use shield if kart is going to hit an item box
@@ -986,10 +986,10 @@ class ExpertAgent:
         if already_drifting and (duration > 0.5):
             # And check if the steer fraction is whithin the allowed range
             if state['skid_direction'] == 1:  # drifting right
-                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN - 0.15:
                     return False
             else:  # drifting left
-                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN + 0.15:
                     return False
             # else we can continue drifting
             return True
@@ -998,7 +998,7 @@ class ExpertAgent:
         if ((steer_fraction > 0) and (track_direction == DirectionType.DIR_LEFT)) or ((steer_fraction < 0) and (track_direction == DirectionType.DIR_RIGHT)):
             return False
         # If the time to finish the curve is higher than the minimum skid time till bonus, we should drift
-        should_drift = duration >= ExpertAgent.SKID_TIME_TILL_BONUS[0]
+        should_drift = duration > ExpertAgent.SKID_TIME_TILL_BONUS[0]
         if should_drift:
             # Finally check if the steer fraction is whithin the allowed range
             if track_direction == DirectionType.DIR_RIGHT:
@@ -1023,8 +1023,8 @@ class ExpertAgent:
         Returns:
             float: The adjusted steering value for drifting.
         """
-        if state['prev_skid_direction'] == 0:
-            return steering  # no adjustment on the first frame of drifting
+        if state['time_since_skid_start'] < 3 * self.env.config.step_size:
+            return steering  # no adjustment on the first frames of drifting
         delta = ExpertAgent.SKID_REDUCE_TURN_MAX - ExpertAgent.SKID_REDUCE_TURN_MIN
         if state['skid_direction'] == 0:  # not skidding
             return steering
