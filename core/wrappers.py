@@ -949,7 +949,7 @@ class ExpertObservations(Wrapper):
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), item_to_avoid_position)
                 if abs(angle) < 0.3:
                     dist_to_item = np.linalg.norm(item_to_avoid_position).item()
-                    nb_max_steps = 4 if observation['skid_direction'] == 0 else 6  # give more time to avoid if drifting
+                    nb_max_steps = 4
                     nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.unwrapped.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Return that we need to avoid this item and the new target point
@@ -968,7 +968,7 @@ class ExpertObservations(Wrapper):
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), kart_position)
                 if abs(angle) < 0.3:
                     dist_to_kart = np.linalg.norm(kart_position).item()
-                    nb_max_steps = 4 if observation['skid_direction'] == 0 else 6  # give more time to avoid if drifting
+                    nb_max_steps = 4
                     nb_steps_to_reach = ((dist_to_kart - ExpertAgent.KART_LENGTH) / relative_speed) / self.env.unwrapped.config.step_size
                     if nb_steps_to_reach < nb_max_steps:
                         # Return that we need to avoid this kart and the new target point
