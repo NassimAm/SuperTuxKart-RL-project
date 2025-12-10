@@ -216,8 +216,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tags",
         "-t",
-        nargs="+",
-        default=None,
+        nargs="*",
+        default=[],
         help="Tags for the experiment.",
     )
     parser.add_argument(
