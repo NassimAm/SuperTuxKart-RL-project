@@ -152,7 +152,7 @@ class DAgger:
                             # Get the model input
                             model_input = state_tensor.unsqueeze(0)
                             # Get the action from the current policy
-                            action_pred = torch.cat(model(model_input))
+                            action_pred = torch.cat(model(model_input.to(device))).cpu()
                             action_to_play = Action.to_env(Action.from_model(action_pred))
                     # Store the state-expert_action pair in the replay buffer
                     replay_buffer.add(state_tensor, expert_action_tensor)
@@ -166,7 +166,9 @@ class DAgger:
             train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
             # Set model to train mode
             model.train()
-            train_losses = []
+            train_stats = {
+                'total_loss': []
+            }
             # Train the model for several epochs
             for epoch in range(epochs):
                 # Training step
@@ -184,31 +186,46 @@ class DAgger:
                             action_loss = bce_fn(pred_action, actions_batch[:, i])
                             acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
                             if logging:
-                                neptune_run[f'train/{name}_accuracy'].append(acc.item())
-                                neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                                if f'{name}_accuracy' not in train_stats:
+                                    train_stats[f'{name}_accuracy'] = []
+                                train_stats[f'{name}_accuracy'].append(acc.item())
+                                if f'{name}_loss' not in train_stats:
+                                    train_stats[f'{name}_loss'] = []
+                                train_stats[f'{name}_loss'].append(action_loss.item())
                         else:
                             action_loss = mse_fn(pred_action, actions_batch[:, i])
                             if logging:
-                                neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                                if f'{name}_loss' not in train_stats:
+                                    train_stats[f'{name}_loss'] = []
+                                train_stats[f'{name}_loss'].append(action_loss.item())
                         # Accumulate loss
                         train_loss += action_loss
                     # Save and log total loss
-                    train_losses.append(train_loss.item())
-                    if logging:
-                        neptune_run['train/total_loss'].append(train_loss.item())
+                    train_stats['total_loss'].append(train_loss.item())
                     # Backpropagation
                     train_loss.backward()
                     optimizer.step()
-            # Save model
-            torch.save(model.state_dict(), model_path)
-            # Upload model to neptune
+            # Log training metrics to neptune
             if logging:
-                neptune_run["model/dagger"].upload(model_path)
-
+                for key, values in train_stats.items():
+                    neptune_run[f"train/{key}"].log(np.mean(values).item())
+            # Save model
+            if it % 10 == 0:
+                # Save model locally
+                torch.save(model.state_dict(), model_path)
+                # Upload model to neptune
+                if logging:
+                    neptune_run["model/dagger"].upload(model_path)
             # Update progress bar description
-            tqdm_bar.set_description(f"Iteration {it+1}/{nb_iterations} - Train Loss: {np.mean(train_losses).item():.2f}")
-        # Stop neptune run
+            tqdm_bar.set_description(f"Iteration {it+1}/{nb_iterations} - Train Loss: {np.mean(train_stats['total_loss']).item():.2f}")
+
+        # Save final model locally
+        torch.save(model.state_dict(), model_path)
+        # Final model upload and stop neptune run
         if logging:
+            # Upload final model to neptune
+            neptune_run["model/dagger"].upload(model_path)
+            # Stop neptune run
             neptune_run.stop()
 
 

@@ -105,7 +105,9 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
     for epoch in tqdm_bar:
         # Training step
         model.train()
-        train_losses = []
+        train_stats = {
+            'total_loss': []
+        }
         for states_batch, actions_batch in train_loader:
             states_batch = states_batch.to(device)
             actions_batch = actions_batch.to(device)
@@ -124,25 +126,31 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
                     action_loss = bce_fn(pred_action, actions_batch[:, i])
                     acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
                     if logging:
-                        neptune_run[f'train/{name}_accuracy'].append(acc.item())
-                        neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                        if f'{name}_accuracy' not in train_stats:
+                            train_stats[f'{name}_accuracy'] = []
+                        train_stats[f'{name}_accuracy'].append(acc.item())
+                        if f'{name}_loss' not in train_stats:
+                            train_stats[f'{name}_loss'] = []
+                        train_stats[f'{name}_loss'].append(action_loss.item())
                 else:
                     action_loss = mse_fn(pred_action, actions_batch[:, i])
                     if logging:
-                        neptune_run[f'train/{name}_loss'].append(action_loss.item())
+                        if f'{name}_loss' not in train_stats:
+                            train_stats[f'{name}_loss'] = []
+                        train_stats[f'{name}_loss'].append(action_loss.item())
                 # Accumulate loss
                 train_loss += action_loss
             # Save and log total loss
-            train_losses.append(train_loss.item())
-            if logging:
-                neptune_run['train/total_loss'].append(train_loss.item())
+            train_stats["total_loss"].append(train_loss.item())
             # Backpropagation
             train_loss.backward()
             optimizer.step()
 
         # Evaluation step
         model.eval()
-        test_losses = []
+        test_stats = {
+            'total_loss': []
+        }
         with torch.no_grad():
             for states_batch, actions_batch in test_loader:
                 states_batch = states_batch.to(device)
@@ -157,30 +165,47 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
                         action_loss = bce_fn(pred_action, actions_batch[:, i])
                         acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
                         if logging:
-                            neptune_run[f'test/{name}_accuracy'].append(acc.item())
-                            neptune_run[f'test/{name}_loss'].append(action_loss.item())
+                            if f'{name}_accuracy' not in test_stats:
+                                test_stats[f'{name}_accuracy'] = []
+                            test_stats[f'{name}_accuracy'].append(acc.item())
+                            if f'{name}_loss' not in test_stats:
+                                test_stats[f'{name}_loss'] = []
+                            test_stats[f'{name}_loss'].append(action_loss.item())
                     else:
                         action_loss = mse_fn(pred_action, actions_batch[:, i])
                         if logging:
-                            neptune_run[f'test/{name}_loss'].append(action_loss.item())
+                            if f'{name}_loss' not in test_stats:
+                                test_stats[f'{name}_loss'] = []
+                            test_stats[f'{name}_loss'].append(action_loss.item())
                     # Accumulate loss
                     test_loss += action_loss
                 # Save and log total loss
-                test_losses.append(test_loss.item())
-                if logging:
-                    neptune_run['test/total_loss'].append(test_loss.item())
+                test_stats["total_loss"].append(test_loss.item())
 
-        # Save model
-        torch.save(model.state_dict(), model_path)
-        # Upload model to neptune
+        # Log training metrics to neptune
         if logging:
-            neptune_run["model/behavioral_cloning"].upload(model_path)
+            for key, values in train_stats.items():
+                neptune_run[f"train/{key}"].log(np.mean(values).item())
+            for key, values in test_stats.items():
+                neptune_run[f"test/{key}"].log(np.mean(values).item())
+        # Save model
+        if epoch % 10 == 0:
+            # Save model locally
+            torch.save(model.state_dict(), model_path)
+            # Upload model to neptune
+            if logging:
+                neptune_run["model/behavioral_cloning"].upload(model_path)
 
         # Update progress bar description
-        tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Loss: {np.mean(train_losses).item():.2f} - Test Loss: {np.mean(test_losses).item():.2f}")
+        tqdm_bar.set_description(f"Epoch {epoch+1}/{nb_epochs} - Train Loss: {np.mean(train_stats['total_loss']).item():.2f} - Test Loss: {np.mean(test_stats['total_loss']).item():.2f}")
 
-    # Stop neptune run
+    # Save final model locally
+    torch.save(model.state_dict(), model_path)
+    # Final model upload and stop neptune run
     if logging:
+        # Upload final model to neptune
+        neptune_run["model/behavioral_cloning"].upload(model_path)
+        # Stop neptune run
         neptune_run.stop()
 
 
