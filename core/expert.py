@@ -89,7 +89,7 @@ class ExpertAgent:
 
     def __init__(self, env: Env, enable_drift: bool = True,
                  avoid_bad_items: bool = True, avoid_karts: bool = True,
-                 use_nitro: bool = True, use_items: bool = True, path_decision_angle:int = 45):
+                 use_nitro: bool = True, use_items: bool = True, collect_items: bool = False, path_decision_angle:int = 45):
         """Initializes the ExpertAgent.
 
         Args:
