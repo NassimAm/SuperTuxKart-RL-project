@@ -79,3 +79,20 @@ class ActorResMLP(nn.Module):
                 action.append(head(features).squeeze(-1))
         # Return all action predictions
         return action
+
+
+class CriticMLP(nn.Module):
+    """A simple feedforward neural network for the actor."""
+
+    def __init__(self, input_dim: int, hidden_dim: int):
+        super(CriticMLP, self).__init__()
+        self.critic = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        return self.critic(state)

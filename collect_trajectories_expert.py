@@ -2,6 +2,7 @@
 to pretrain our RL Agent."""
 
 import gymnasium as gym
+from gymnasium.wrappers import TimeLimit
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
 from core.state import State
@@ -17,9 +18,10 @@ def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_it
                          avoid_karts: bool = True, use_nitro: bool = True, use_items: bool = True,
                          difficulty: int = 2):
     """"""
-    env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=True), difficulty=difficulty, num_kart=10)
+    env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     previous_action_horizon = 1
     wrappers = [
+        lambda env: TimeLimit(env, max_episode_steps=2500),
         lambda env: ConstantSizedObservations(env, state_paths=10),
         lambda env: EnhanceObservations(env),
         lambda env: StuckObservations(env),

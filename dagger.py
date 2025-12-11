@@ -4,6 +4,7 @@ We opt for this approach as the sb3 DAgger implementation lacks support for cust
 
 import random
 import gymnasium as gym
+from gymnasium.wrappers import TimeLimit
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
 from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
@@ -103,6 +104,7 @@ class DAgger:
         # Initialize the environment with necessary wrappers
         env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=2, num_kart=10)
         wrappers = [
+            lambda env: TimeLimit(env, max_episode_steps=2500),
             lambda env: ConstantSizedObservations(env, state_paths=10),
             lambda env: EnhanceObservations(env),
             lambda env: StuckObservations(env),
@@ -245,7 +247,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_drift", '-d', action="store_true", help="Whether to enable drifting behavior in the expert agent.")
     args = parser.parse_args()
 
-    dagger_trainer = DAgger(enable_drift= not args.disable_drift)
+    dagger_trainer = DAgger(enable_drift=not args.disable_drift)
     dagger_trainer.train(
         nb_iterations=args.nb_iterations,
         epochs=args.epochs,
