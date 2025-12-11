@@ -242,9 +242,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="dagger.pth", help="Path to save the trained model.")
     parser.add_argument("--experiment_name", type=str, default=None, help="Name of the experiment for logging.")
     parser.add_argument("--tags", nargs='*', default=[], help="Tags for the Neptune experiment.")
+    parser.add_argument("--disable_drift", '-d', action="store_true", help="Whether to enable drifting behavior in the expert agent.")
     args = parser.parse_args()
 
-    dagger_trainer = DAgger(enable_drift=True)
+    dagger_trainer = DAgger(enable_drift= not args.disable_drift)
     dagger_trainer.train(
         nb_iterations=args.nb_iterations,
         epochs=args.epochs,
