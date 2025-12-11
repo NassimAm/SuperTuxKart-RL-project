@@ -6,9 +6,13 @@ import torch
 class TrajectoryDataset(Dataset):
     """A dataset for storing trajectories of states, actions, and rewards"""
 
-    def __init__(self, states: np.ndarray, actions: np.ndarray):
-        self.states = torch.from_numpy(states)
-        self.actions = torch.from_numpy(actions)
+    def __init__(self, states, actions):
+        if isinstance(states, np.ndarray) and isinstance(actions, np.ndarray):
+            self.states = torch.from_numpy(states)
+            self.actions = torch.from_numpy(actions)
+        else:
+            self.states = torch.cat([s.unsqueeze(0) for s in states], dim=0)
+            self.actions = torch.cat([a.unsqueeze(0) for a in actions], dim=0)
 
     def __len__(self):
         return len(self.states)

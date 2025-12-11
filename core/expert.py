@@ -541,7 +541,7 @@ class ExpertAgent:
         speed = state['velocity'][2]
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_avoid) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_avoid[0][0]]))
-            if ((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5:
+            if (speed > 0) and (((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
                 action['fire'] = True
                 return
         # Use shield if kart is going to hit an item box
@@ -810,6 +810,11 @@ class ExpertAgent:
         # where r is the radius (= position on the X axis), and x, z are the
         # local coordinates of the point to aim at. Solving for r
         # results in r = (x**2 + y**2) / (2 * x)
+
+        # Catch edge case where target_point[0] is zero to avoid division by zero
+        if target_point[0] == 0:
+            return 0.0
+        # Otherwise
         radius = (target_point[0] * target_point[0] + target_point[2] * target_point[2]) / (2.0 * target_point[0])
         # Compute steer angle
         steer_angle = np.atan(ExpertAgent.WHEEL_BASE / radius).item()
@@ -931,7 +936,7 @@ class ExpertAgent:
         line1_a = (q1[2] - mid[2]) / (q1[0] - mid[0]) if (q1[0] - mid[0]) != 0 else None
         line1_b = mid[2] - line1_a * mid[0] if line1_a is not None else None
         # Compute line intersection with x axis
-        if line1_a is not None:
+        if (line1_a is not None) and (line1_a != 0):
             # If there is an intersection, calculate its coordinates
             intersect_x = (-line1_b) / line1_a
             intersect_z = line1_a * intersect_x + line1_b
@@ -987,10 +992,10 @@ class ExpertAgent:
         if already_drifting and (duration > 0.5):
             # And check if the steer fraction is whithin the allowed range
             if state['skid_direction'] == 1:  # drifting right
-                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN - 0.15:
                     return False
             else:  # drifting left
-                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN:
+                if steer_fraction > -ExpertAgent.SKID_REDUCE_TURN_MIN + 0.15:
                     return False
             # else we can continue drifting
             return True
@@ -999,7 +1004,7 @@ class ExpertAgent:
         if ((steer_fraction > 0) and (track_direction == DirectionType.DIR_LEFT)) or ((steer_fraction < 0) and (track_direction == DirectionType.DIR_RIGHT)):
             return False
         # If the time to finish the curve is higher than the minimum skid time till bonus, we should drift
-        should_drift = duration >= ExpertAgent.SKID_TIME_TILL_BONUS[0]
+        should_drift = duration > ExpertAgent.SKID_TIME_TILL_BONUS[0]
         if should_drift:
             # Finally check if the steer fraction is whithin the allowed range
             if track_direction == DirectionType.DIR_RIGHT:
@@ -1024,6 +1029,8 @@ class ExpertAgent:
         Returns:
             float: The adjusted steering value for drifting.
         """
+        if state['time_since_skid_start'] < 3 * self.env.config.step_size:
+            return steering  # no adjustment on the first frames of drifting
         delta = ExpertAgent.SKID_REDUCE_TURN_MAX - ExpertAgent.SKID_REDUCE_TURN_MIN
         if state['skid_direction'] == 0:  # not skidding
             return steering

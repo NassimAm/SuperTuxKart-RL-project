@@ -384,6 +384,7 @@ class State(TypedDict):
             torch.tensor(state['track_direction'].encode(), dtype=torch.float32),
             torch.tensor([state['curve_duration']], dtype=torch.float32),
             torch.tensor([state['skid_direction']], dtype=torch.float32),
+            torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
             torch.tensor([state['skeed_factor']], dtype=torch.float32),
             # Powerup
             torch.tensor(state['powerup'].encode(), dtype=torch.float32),
