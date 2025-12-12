@@ -182,7 +182,7 @@ class DAgger:
                     pred_actions = model(states_batch)
 
                     train_loss = 0.0
-                    for i, (name, (_, action_type), pred_action) in enumerate(zip(Action.NAMES, action_types, pred_actions)):
+                    for i, ((name, action_type), pred_action) in enumerate(zip(action_types, pred_actions)):
                         # Compute loss and accuracy for each action dimension according to its type
                         if action_type == 'discrete':
                             action_loss = bce_fn(pred_action, actions_batch[:, i])
