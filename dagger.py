@@ -228,7 +228,7 @@ class DAgger:
                             # Get the model input
                             model_input = state_tensor.unsqueeze(0)
                             # Get the action from the current policy
-                            action_pred = torch.cat(policy_model(model_input.to(device))).cpu()
+                            action_pred = torch.cat(policy_model(model_input.to(device)))
                             action_to_play = Action.to_env(Action.from_model(action_pred))
                     # Step in the environment
                     state, reward, terminated, truncated, _ = env.step(action_to_play)
