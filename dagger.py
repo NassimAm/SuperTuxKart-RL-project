@@ -70,6 +70,7 @@ class DAgger:
 
     @torch.no_grad()
     def compute_gae(
+        self,
         critic,
         states: torch.Tensor,          # [T + 1, obs_dim]
         rewards: torch.Tensor,         # [T]
@@ -264,11 +265,12 @@ class DAgger:
             train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
             # Set model to train mode
             policy_model.train()
+            train_stats = {
+                'policy_loss': []
+            }
             if with_critic:
                 critic_model.train()
-            train_stats = {
-                'total_loss': []
-            }
+                train_stats['critic_loss'] = []
             # Train the model for several epochs
             for epoch in range(epochs):
                 # Training step
