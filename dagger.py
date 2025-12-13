@@ -9,7 +9,7 @@ from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
 from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
 from core.expert import ExpertAgent
-from core.nn import ActorMLP
+from core.nn import ActorMLP, CriticMLP
 from core.state import State
 from core.action import Action
 from core.trajectory import TrajectoryDataset
@@ -30,15 +30,27 @@ class ReplayBuffer:
     def __init__(self, max_size: int = 100000):
         self.states = []
         self.actions = []
+        self.returns = []
         self.max_size = max_size
 
-    def add(self, state, action):
+    def add(self, state: torch.Tensor, action: torch.Tensor, return_: Optional[torch.Tensor] = None):
         """Add a state-action pair to the buffer."""
         if self.size() >= self.max_size:
             self.states.pop(0)
             self.actions.pop(0)
+            if return_ is not None:
+                self.returns.pop(0)
         self.states.append(state)
         self.actions.append(action)
+        if return_ is not None:
+            self.returns.append(return_)
+
+    def bulk_add(self, states: list[torch.Tensor], actions: list[torch.Tensor], returns: Optional[list[torch.Tensor]] = None):
+        """Add multiple state-action pairs to the buffer."""
+        if returns is None or len(returns) == 0:
+            returns = [None] * len(states)
+        for state, action, return_ in zip(states, actions, returns):
+            self.add(state, action, return_)
 
     def size(self):
         """Return the current size of the buffer."""
@@ -56,9 +68,56 @@ class DAgger:
         """
         self.enable_drift = enable_drift
 
+    @torch.no_grad()
+    def compute_gae(
+        critic,
+        states: torch.Tensor,          # [T + 1, obs_dim]
+        rewards: torch.Tensor,         # [T]
+        terminated: torch.Tensor,      # [T]  (1.0 if terminated at step t, else 0.0)
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+        device: str = "cpu",
+    ):
+        """Compute GAE advantages and returns.
+
+        Args:
+            critic: The critic model to estimate state values.
+            states (torch.Tensor): Tensor of states of shape [T + 1, obs_dim].
+            rewards (torch.Tensor): Tensor of rewards of shape [T].
+            terminated (torch.Tensor): Tensor indicating episode termination of shape [T].
+            gamma (float): Discount factor.
+            gae_lambda (float): GAE lambda parameter.
+            device (str): Device to perform computations on.
+        """
+        # Move tensors to device
+        states = states.to(device)
+        rewards = rewards.to(device)
+        terminated = terminated.to(device)
+        # Compute all state values V(s_t)
+        all_values = critic(states)        # [T + 1]
+        # V(s_t)
+        values = all_values[:-1]           # [T]
+        # V(s_t+1)
+        next_values = all_values[1:]       # [T]
+        # Compute mask for bootstrapping
+        must_bootstrap = 1.0 - terminated  # [T]
+        # Compute TD deltas
+        deltas = rewards + gamma * next_values * must_bootstrap - values
+        # Compute advantages
+        advantages = torch.zeros_like(rewards)
+        gae = 0.0
+        for t in reversed(range(len(rewards))):
+            gae = deltas[t] + gamma * gae_lambda * must_bootstrap[t] * gae
+            advantages[t] = gae
+        # Compute returns
+        returns = advantages + values
+        return advantages.detach(), returns.detach(), values.detach()
+
     def train(self, nb_iterations: int = 1000, epochs: int = 10, nb_races_per_iteration: int = 2,
               buffer_size: int = 100000, batch_size: int = 512, learning_rate: float = 1e-3, min_eps: float = 1e-3,
-              logging: bool = False, model_path: str = "dagger.pth", experiment_name: Optional[str] = None, tags: list[str] = []):
+              with_critic: bool = False, gamma: float = 0.99, gae_lambda: float = 0.95, policy_model_path: str = "dagger_policy.pth",
+              critic_model_path: str = "dagger_critic.pth", logging: bool = False, experiment_name: Optional[str] = None,
+              tags: list[str] = []):
         """Train the model using the DAgger algorithm.
 
         Args:
@@ -69,8 +128,12 @@ class DAgger:
             batch_size (int): Batch size for training.
             learning_rate (float): Learning rate for the optimizer.
             min_eps (float): Minimum epsilon for expert action selection.
+            with_critic (bool): Whether to use a critic for advantage estimation.
+            gamma (float): Discount factor for GAE.
+            gae_lambda (float): GAE lambda parameter.
+            policy_model_path (str): Path to save the trained policy model.
+            critic_model_path (str): Path to save the trained critic model.
             logging (bool): Whether to log the training process to Neptune.
-            model_path (str): Path to save the trained model.
             experiment_name (Optional[str]): Name of the experiment for logging.
             tags (list[str]): Tags for the Neptune experiment.
         """
@@ -120,11 +183,15 @@ class DAgger:
         print(f"Using device: {device}")
         # Initialize the actor model
         state, _ = env.reset()
-        model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=512).to(device)
+        policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=512).to(device)
+        if with_critic:
+            critic_model = CriticMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=512).to(device)
         # Prepare the replay buffer
         replay_buffer = ReplayBuffer(max_size=buffer_size)
         # Prepare the optimizer and loss function
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        policy_optimizer = torch.optim.Adam(policy_model.parameters(), lr=learning_rate)
+        if with_critic:
+            critic_optimizer = torch.optim.Adam(critic_model.parameters(), lr=learning_rate)
         mse_fn = torch.nn.MSELoss()
         bce_fn = torch.nn.BCELoss()
         action_types = Action.get_types()
@@ -134,9 +201,15 @@ class DAgger:
         tqdm_bar = tqdm(range(nb_iterations), desc="DAgger Training")
         for it in tqdm_bar:
             # Set model to eval mode
-            model.eval()
+            policy_model.eval()
             # Run several races to collect data
             for _ in range(nb_races_per_iteration):
+                # Initialize episode data
+                episode_states = []
+                episode_actions = []
+                episode_rewards = []
+                episode_terminated = []
+                # Rollout episode
                 done = False
                 state, _ = env.reset()
                 while not done:
@@ -154,34 +227,65 @@ class DAgger:
                             # Get the model input
                             model_input = state_tensor.unsqueeze(0)
                             # Get the action from the current policy
-                            action_pred = torch.cat(model(model_input.to(device))).cpu()
+                            action_pred = torch.cat(policy_model(model_input.to(device))).cpu()
                             action_to_play = Action.to_env(Action.from_model(action_pred))
-                    # Store the state-expert_action pair in the replay buffer
-                    replay_buffer.add(state_tensor, expert_action_tensor)
                     # Step in the environment
                     state, reward, terminated, truncated, _ = env.step(action_to_play)
                     done = terminated or truncated
+                    # Store episode data
+                    episode_states.append(state_tensor)
+                    episode_actions.append(expert_action_tensor)
+                    episode_rewards.append(reward)
+                    episode_terminated.append(float(terminated))
+                # If we are training a critic, compute episode return (GAE)
+                if with_critic:
+                    episode_states.append(State.to_model(State.from_env(state)))  # Add final state
+                    states_tensor = torch.stack(episode_states)                                # [T + 1, obs_dim]
+                    rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)        # [T]
+                    terminated_tensor = torch.tensor(episode_terminated, dtype=torch.float32)  # [T]
+                    advantages, returns, _ = self.compute_gae(
+                        critic_model,
+                        states_tensor,
+                        rewards_tensor,
+                        terminated_tensor,
+                        gamma=gamma,
+                        gae_lambda=gae_lambda,
+                        device=device
+                    )
+                    # Store the state-expert_action-return triplet in the replay buffer
+                    replay_buffer.bulk_add(episode_states[:-1], episode_actions, returns)
+                else:
+                    # Store the state-expert_action pair in the replay buffer
+                    replay_buffer.bulk_add(episode_states, episode_actions)
             # Decay epsilon
             eps *= eps_rate
             # Prepare the dataset from the replay buffer
-            dataset = TrajectoryDataset(replay_buffer.states, replay_buffer.actions)
+            dataset = TrajectoryDataset(replay_buffer.states, replay_buffer.actions, replay_buffer.returns)
             train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
             # Set model to train mode
-            model.train()
+            policy_model.train()
+            if with_critic:
+                critic_model.train()
             train_stats = {
                 'total_loss': []
             }
             # Train the model for several epochs
             for epoch in range(epochs):
                 # Training step
-                for states_batch, actions_batch in train_loader:
+                for states_batch, actions_batch, returns_batch in train_loader:
+                    # Move batch to device
                     states_batch = states_batch.to(device)
                     actions_batch = actions_batch.to(device)
-
-                    optimizer.zero_grad()
-                    pred_actions = model(states_batch)
-
-                    train_loss = 0.0
+                    returns_batch = returns_batch.to(device)
+                    # Policy forward pass
+                    policy_optimizer.zero_grad()
+                    pred_actions = policy_model(states_batch)
+                    # Critic forward pass
+                    if with_critic:
+                        critic_optimizer.zero_grad()
+                        values = critic_model(states_batch)
+                    # Compute policy loss
+                    policy_loss = 0.0
                     for i, ((name, action_type), pred_action) in enumerate(zip(action_types, pred_actions)):
                         # Compute loss and accuracy for each action dimension according to its type
                         if action_type == 'discrete':
@@ -201,32 +305,53 @@ class DAgger:
                                     train_stats[f'{name}_loss'] = []
                                 train_stats[f'{name}_loss'].append(action_loss.item())
                         # Accumulate loss
-                        train_loss += action_loss
-                    # Save and log total loss
-                    train_stats['total_loss'].append(train_loss.item())
+                        policy_loss += action_loss
+                    # Save policy loss
+                    train_stats['policy_loss'].append(policy_loss.item())
+                    total_loss = policy_loss
+                    # Compute critic loss
+                    if with_critic:
+                        value_loss = mse_fn(values, returns_batch)
+                        train_stats['critic_loss'].append(value_loss.item())
+                        total_loss += value_loss
                     # Backpropagation
-                    train_loss.backward()
-                    optimizer.step()
+                    total_loss.backward()
+                    policy_optimizer.step()
+                    if with_critic:
+                        critic_optimizer.step()
             # Log training metrics to neptune
             if logging:
                 for key, values in train_stats.items():
                     neptune_run[f"train/{key}"].log(np.mean(values).item())
             # Save model
             if it % 10 == 0:
-                # Save model locally
-                torch.save(model.state_dict(), model_path)
-                # Upload model to neptune
+                # Save policy model locally
+                torch.save(policy_model.state_dict(), policy_model_path)
+                # Save critic model locally
+                if with_critic:
+                    torch.save(critic_model.state_dict(), critic_model_path)
+                # Upload models to neptune
                 if logging:
-                    neptune_run["model/dagger"].upload(model_path)
+                    # Upload policy model to neptune
+                    neptune_run["model/dagger_policy"].upload(policy_model_path)
+                    # Upload critic model to neptune
+                    if with_critic:
+                        neptune_run["model/dagger_critic"].upload(critic_model_path)
             # Update progress bar description
-            tqdm_bar.set_description(f"Iteration {it+1}/{nb_iterations} - Train Loss: {np.mean(train_stats['total_loss']).item():.2f}")
+            tqdm_bar.set_description(f"Iteration {it+1}/{nb_iterations} - Train Loss: {np.mean(train_stats['policy_loss']).item():.2f}")
 
-        # Save final model locally
-        torch.save(model.state_dict(), model_path)
-        # Final model upload and stop neptune run
+        # Save final policy model locally
+        torch.save(policy_model.state_dict(), policy_model_path)
+        # Save final critic model locally
+        if with_critic:
+            torch.save(critic_model.state_dict(), critic_model_path)
+        # Upload final models to neptune and stop neptune run
         if logging:
-            # Upload final model to neptune
-            neptune_run["model/dagger"].upload(model_path)
+            # Upload final policy model to neptune
+            neptune_run["model/dagger_policy"].upload(policy_model_path)
+            # Upload final critic model to neptune
+            if with_critic:
+                neptune_run["model/dagger_critic"].upload(critic_model_path)
             # Stop neptune run
             neptune_run.stop()
 
@@ -240,8 +365,12 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size for training.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for the optimizer.")
     parser.add_argument("--min_eps", type=float, default=1e-3, help="Minimum epsilon for expert action selection.")
+    parser.add_argument("--with_critic", action="store_true", help="Whether to use a critic for advantage estimation.")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor for GAE.")
+    parser.add_argument("--gae_lambda", type=float, default=0.95, help="GAE lambda parameter.")
+    parser.add_argument("--policy_model_path", type=str, default="dagger_policy.pth", help="Path to save the trained policy model.")
+    parser.add_argument("--critic_model_path", type=str, default="dagger_critic.pth", help="Path to save the trained critic model.")
     parser.add_argument("--logging", '-l', action="store_true", help="Whether to log the training process to Neptune.")
-    parser.add_argument("--model_path", type=str, default="dagger.pth", help="Path to save the trained model.")
     parser.add_argument("--experiment_name", type=str, default=None, help="Name of the experiment for logging.")
     parser.add_argument("--tags", nargs='*', default=[], help="Tags for the Neptune experiment.")
     parser.add_argument("--disable_drift", '-d', action="store_true", help="Whether to enable drifting behavior in the expert agent.")
@@ -256,8 +385,12 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         min_eps=args.min_eps,
+        with_critic=args.with_critic,
+        gamma=args.gamma,
+        gae_lambda=args.gae_lambda,
+        policy_model_path=args.policy_model_path,
+        critic_model_path=args.critic_model_path,
         logging=args.logging,
-        model_path=args.model_path,
         experiment_name=args.experiment_name,
         tags=args.tags
     )

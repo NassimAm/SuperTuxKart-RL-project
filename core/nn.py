@@ -95,4 +95,4 @@ class CriticMLP(nn.Module):
         )
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
-        return self.critic(state)
+        return self.critic(state).squeeze(-1)

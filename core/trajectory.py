@@ -6,19 +6,27 @@ import torch
 class TrajectoryDataset(Dataset):
     """A dataset for storing trajectories of states, actions, and rewards"""
 
-    def __init__(self, states, actions):
+    def __init__(self, states, actions, returns=None):
         if isinstance(states, np.ndarray) and isinstance(actions, np.ndarray):
             self.states = torch.from_numpy(states)
             self.actions = torch.from_numpy(actions)
+            if (returns is not None) and (len(returns) > 0) and isinstance(returns, np.ndarray):
+                self.returns = torch.from_numpy(returns)
+            else:
+                self.returns = torch.zeros((self.states.shape[0],))
         else:
             self.states = torch.cat([s.unsqueeze(0) for s in states], dim=0)
             self.actions = torch.cat([a.unsqueeze(0) for a in actions], dim=0)
+            if (returns is not None) and (len(returns) > 0):
+                self.returns = torch.cat([r.unsqueeze(0) for r in returns], dim=0)
+            else:
+                self.returns = torch.zeros((self.states.shape[0],))
 
     def __len__(self):
         return len(self.states)
 
     def __getitem__(self, idx):
-        return self.states[idx], self.actions[idx]
+        return self.states[idx], self.actions[idx], self.returns[idx]
 
     def get_state_dim(self) -> int:
         """Get the dimension of the flattened state."""
