@@ -966,6 +966,9 @@ class ExpertAgent:
             bool: True if the kart can drift, False otherwise.
         """
         # 1) Track changes
+        # If the kart is off-road, we cannot drift
+        if not state['is_on_road']:
+            return False
         # If the track is straight or undefined, we cannot drift
         if (track_direction == DirectionType.DIR_STRAIGHT) or (track_direction == DirectionType.DIR_UNDEFINED):
             return False
