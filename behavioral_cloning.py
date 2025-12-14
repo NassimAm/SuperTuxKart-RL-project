@@ -108,7 +108,7 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
         train_stats = {
             'total_loss': []
         }
-        for states_batch, actions_batch in train_loader:
+        for states_batch, actions_batch, _ in train_loader:
             states_batch = states_batch.to(device)
             actions_batch = actions_batch.to(device)
 
@@ -152,7 +152,7 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
             'total_loss': []
         }
         with torch.no_grad():
-            for states_batch, actions_batch in test_loader:
+            for states_batch, actions_batch, _ in test_loader:
                 states_batch = states_batch.to(device)
                 actions_batch = actions_batch.to(device)
 
