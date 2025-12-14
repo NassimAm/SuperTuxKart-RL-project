@@ -29,9 +29,9 @@ class ExpertAgent:
     """Whether to collect items on the track."""
     max_speed: float
     """The maximum speed of the kart based on difficulty level."""
-    path_decision_angle: int = 45 # degrees
+    path_decision_angle: int = 45  # degrees
     """The angle threshold for path decision-making."""
-    
+
     # ============================== Path characteristics ==============================
     MAX_STRAIGHT_ANGLE = 0.1  # radians
     # ============================== Kart characteristics ==============================
@@ -85,11 +85,10 @@ class ExpertAgent:
     # firing
     MAX_TIME_SINCE_LAST_FIRE = 5.0  # seconds
 
-    
-
     def __init__(self, env: Env, enable_drift: bool = True,
                  avoid_bad_items: bool = True, avoid_karts: bool = True,
-                 use_nitro: bool = True, use_items: bool = True, collect_items: bool = False, path_decision_angle:int = 45):
+                 use_nitro: bool = True, use_items: bool = True, collect_items: bool = False,
+                 path_decision_angle: int = 45):
         """Initializes the ExpertAgent.
 
         Args:
@@ -130,14 +129,18 @@ class ExpertAgent:
         if state['phase'].value < Phase.RACE_PHASE.value:
             self.__handle_race_start(state, action)
             return Action.to_env(action)
+        # Get the target path ID
+        target_path_id = self.__get_target_path_id(state)
+        # Get the target position
+        target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Determine the track direction
-        track_direction, last_path_id = self.__determine_track_direction(state)
+        track_direction, last_path_id = self.__determine_track_direction(state, target_position)
         # Get track curve
         curve_center, curve_radius = self.__determine_turn_radius(state, last_path_id)
         # Handle acceleration and braking
         self.__handle_acceleration_and_braking(state, action, track_direction, last_path_id, curve_radius)
         # Handle steering
-        self.__handle_steering(state, action, track_direction, last_path_id, curve_center, curve_radius)
+        self.__handle_steering(state, action, target_position, track_direction, last_path_id, curve_center, curve_radius)
         # Return the action in the expected environment format
         return Action.to_env(action)
 
@@ -307,22 +310,19 @@ class ExpertAgent:
                     action['fire'] = True
                     return
 
-    def __handle_steering(self, state: State, action: Action, track_direction: DirectionType, last_path_id: Optional[int],
+    def __handle_steering(self, state: State, action: Action, target_position: np.ndarray, track_direction: DirectionType, last_path_id: Optional[int],
                           curve_center: Optional[np.ndarray], curve_radius: Optional[float]):
         """Handles steering logic based on the current state.
 
         Args:
             state (State): The current state of the environment.
             action (Action): The action to modify.
+            target_position (np.ndarray): The target position to aim for.
             track_direction (DirectionType): The direction type of the track.
             last_path_id (Optional[int]): The index of the last path segment considered.
             curve_center (Optional[np.ndarray]): The center of the turn (as a 3D point).
             curve_radius (Optional[float]): The radius of the turn.
         """
-        # Get the target path ID
-        target_path_id = self.__get_target_path_id(state)
-        # Get the target position
-        target_position = (from_polar_to_cartesian(state['paths_start'][target_path_id]) + from_polar_to_cartesian(state['paths_end'][target_path_id])) / 2.0
         # Handle item collection and avoidance
         items_to_collect, items_to_avoid = self.__get_items_ahead(state)
         target_position = self.__handle_collection_and_avoidance(state, target_position, items_to_collect, items_to_avoid)
@@ -846,11 +846,12 @@ class ExpertAgent:
         # Set the steer action
         action['steer'] = np.clip(steer_fraction, -1.0, 1.0).item()
 
-    def __determine_track_direction(self, state: State):
+    def __determine_track_direction(self, state: State, target_position: np.ndarray):
         """Determines the direction of the track based on the upcoming path segments.
 
         Args:
             state (State): The current state of the environment.
+            target_position (np.ndarray): The target position to aim for.
 
         Returns:
             DirectionType: The direction type of the track.
@@ -870,10 +871,9 @@ class ExpertAgent:
             return DirectionType.DIR_UNDEFINED, None
         # Determine if the track is going left, right or straight
         # Get the first angle (between direction to next path and its center direction to the path next to it)
-        # TODO: debug why this isn't working as expected
         current_path_center = next_path_center
         next_path_center = (from_polar_to_cartesian(state['paths_start'][2]) + from_polar_to_cartesian(state['paths_end'][2])) / 2.0
-        v1 = current_path_center
+        v1 = target_position
         v2 = next_path_center - current_path_center
         angle1 = get_xz_angle_between(v1, v2)
         # Get second angle (between path center direction and the next path center direction)
@@ -989,7 +989,7 @@ class ExpertAgent:
         duration = length / speed
         # If we are already drifting, continue to drift until we reached a little bit before the end of the curve
         already_drifting = state['prev_actions'][-1]['drift'] and (state['skid_direction'] != 0)
-        if already_drifting and (duration > 0.5):
+        if already_drifting and (duration > 1.0):
             # And check if the steer fraction is whithin the allowed range
             if state['skid_direction'] == 1:  # drifting right
                 if steer_fraction < ExpertAgent.SKID_REDUCE_TURN_MIN - 0.15:
@@ -1003,8 +1003,8 @@ class ExpertAgent:
         # We want to start drifting so we check if we are steering left in a right curve or steering right in a left curve, if it's the case we cannot drift
         if ((steer_fraction > 0) and (track_direction == DirectionType.DIR_LEFT)) or ((steer_fraction < 0) and (track_direction == DirectionType.DIR_RIGHT)):
             return False
-        # If the time to finish the curve is higher than the minimum skid time till bonus, we should drift
-        should_drift = duration > ExpertAgent.SKID_TIME_TILL_BONUS[0]
+        # If the time to finish the curve is higher than the minimum skid time till bonus plus 1 second to recover from the drift, we should drift
+        should_drift = duration > (ExpertAgent.SKID_TIME_TILL_BONUS[0] + 1.0)
         if should_drift:
             # Finally check if the steer fraction is whithin the allowed range
             if track_direction == DirectionType.DIR_RIGHT:

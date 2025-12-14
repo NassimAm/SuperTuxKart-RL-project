@@ -9,7 +9,15 @@ import numpy as np
 import argparse
 
 
-def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races: int = 100):
+def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_per_track: int = 10):
+    """ Benchmark a trained neural network actor model and save the results to a file.
+
+    Args:
+        model_path (str): The path to the trained actor model.
+        data_path (str): The path to save the benchmark results.
+        difficulty (int): The difficulty level to benchmark on.
+        nb_races_per_track (int): The number of races to run per track.
+    """
     # Load the environment
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     wrappers = [
@@ -21,11 +29,13 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races:
     ]
     for wrapper in wrappers:
         env = wrapper(env)
+    # Get list of tracks
+    tracks = env.unwrapped.TRACKS
     # Load the actor model
     state, _ = env.reset()
     actor = Actor(model_path, State.to_model(State.from_env(state)).shape[0], 512)
     # Run multiple trials
-    nb_trials = nb_races
+    nb_trials = nb_races_per_track * len(tracks)
     tqdm_bar = tqdm(range(nb_trials), desc="Trials")
     positions_data = {
         'track': [],
@@ -34,9 +44,13 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races:
         'reward_std': []
     }
     for trial in tqdm_bar:
+        # Get track_id
+        track_id = trial // nb_races_per_track
+        track = tracks[track_id]
         # Reset the environment
+        env.unwrapped.default_track = track
         state, info = env.reset()
-        positions_data['track'].append(env.unwrapped.current_track)
+        positions_data['track'].append(track)
         rewards = []
         done = False
         nb_steps = 0
@@ -70,12 +84,12 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", "-m", type=str, required=True, help="Path to the trained actor model.")
     parser.add_argument("--data_path", "-d", type=str, required=True, help="Path to save the benchmark results.")
     parser.add_argument("--difficulty", type=int, default=2, help="Difficulty level to benchmark on.")
-    parser.add_argument("--nb_races", type=int, default=100, help="Number of races to run for the benchmark.")
+    parser.add_argument("--nb_races_per_track", type=int, default=10, help="Number of races to run per track for the benchmark.")
     args = parser.parse_args()
 
     benchmark_nn(
         model_path=args.model_path,
         data_path=args.data_path,
         difficulty=args.difficulty,
-        nb_races=args.nb_races
+        nb_races_per_track=args.nb_races_per_track
     )

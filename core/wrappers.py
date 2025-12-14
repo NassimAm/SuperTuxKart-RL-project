@@ -646,14 +646,6 @@ class ExpertObservations(Wrapper):
         """
         # Shallow copy
         observation = {**observation}
-        # Determine track direction
-        direction_type, last_path_id = self.__determine_track_direction(observation)
-        # Get track curve
-        curve_center, curve_radius = self.__determine_turn_radius(observation, last_path_id)
-        # Get kart speed
-        kart_speed = np.linalg.norm(observation['velocity']).item()
-        # Get speed ratio to curve radius (this will enable deciding whether to brake or not)
-        speed_radius_ratio = kart_speed / curve_radius if (curve_radius is not None) and (curve_radius != 0) else 0.0
         # Get target position
         if observation['stuck']:
             # If stuck, target the next path start
@@ -663,6 +655,14 @@ class ExpertObservations(Wrapper):
             target_path_id = self.__get_target_path_id(observation)
             # Get the target position
             target_position = (observation['paths_start'][target_path_id] + observation['paths_end'][target_path_id]) / 2.0
+        # Determine track direction
+        direction_type, last_path_id = self.__determine_track_direction(observation, target_position)
+        # Get track curve
+        curve_center, curve_radius = self.__determine_turn_radius(observation, last_path_id)
+        # Get kart speed
+        kart_speed = np.linalg.norm(observation['velocity']).item()
+        # Get speed ratio to curve radius (this will enable deciding whether to brake or not)
+        speed_radius_ratio = kart_speed / curve_radius if (curve_radius is not None) and (curve_radius != 0) else 0.0
         # Get curve length
         if (last_path_id is not None) and (curve_radius is not None) and (curve_center is not None):
             last_path_center = (observation['paths_start'][last_path_id] + observation['paths_end'][last_path_id]) / 2.0
@@ -701,7 +701,7 @@ class ExpertObservations(Wrapper):
         new_obs = self.get_new_observation(obs)
         return new_obs, reward, terminated, truncated, info
 
-    def __determine_track_direction(self, observation):
+    def __determine_track_direction(self, observation, target_position):
         """Determines the direction of the track based on the upcoming path segments.
 
         Args:
@@ -725,10 +725,9 @@ class ExpertObservations(Wrapper):
             return DirectionType.DIR_UNDEFINED, None
         # Determine if the track is going left, right or straight
         # Get the first angle (between direction to next path and its center direction to the path next to it)
-        # TODO: debug why this isn't working as expected
         current_path_center = next_path_center
         next_path_center = (observation['paths_start'][2] + observation['paths_end'][2]) / 2.0
-        v1 = current_path_center
+        v1 = target_position
         v2 = next_path_center - current_path_center
         angle1 = get_xz_angle_between(v1, v2)
         # Get second angle (between path center direction and the next path center direction)

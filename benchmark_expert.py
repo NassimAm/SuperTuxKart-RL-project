@@ -8,14 +8,14 @@ from tqdm import tqdm
 import argparse
 
 
-def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift: bool = True, nb_races: int = 100):
+def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift: bool = True, nb_races_per_track: int = 10):
     """Benchmark the expert agent on a given difficulty level and save the results to a file.
 
     Args:
         difficulty (int): The difficulty level to benchmark on.
         data_path (str): The path to save the benchmark results.
         enable_drift (bool): Whether to enable drift in the expert agent.
-        nb_races (int): The number of races to run for the benchmark.
+        nb_races_per_track (int): The number of races to run per track.
     """
     # Load the environment
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
@@ -28,10 +28,12 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
     ]
     for wrapper in wrappers:
         env = wrapper(env)
+    # Get list of tracks
+    tracks = env.unwrapped.TRACKS
     # Create the expert agent
     expert = ExpertAgent(env, enable_drift=enable_drift)
     # Run multiple trials
-    nb_trials = nb_races
+    nb_trials = nb_races_per_track * len(tracks)
     tqdm_bar = tqdm(range(nb_trials), desc="Trials")
     positions_data = {
         'track': [],
@@ -40,9 +42,13 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
         'reward_std': []
     }
     for trial in tqdm_bar:
+        # Get track_id
+        track_id = trial // nb_races_per_track
+        track = tracks[track_id]
         # Reset the environment
+        env.unwrapped.default_track = track
         state, info = env.reset()
-        positions_data['track'].append(env.unwrapped.current_track)
+        positions_data['track'].append(track)
         rewards = []
         done = False
         nb_steps = 0
@@ -71,12 +77,12 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
     np.savez(data_path, **positions_data)
 
 
-def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
+def benchmark_expert(data_folder: str, nb_races_per_track: int = 10):
     """Benchmark the expert agent with its two variants (drift enabled and disabled) across multiple difficulty levels and save the results.
 
     Args:
         data_folder (str): The folder to save the benchmark results
-        nb_races_per_difficulty (int): The number of races to run per difficulty level.
+        nb_races_per_track (int): The number of races to run per track.
     """
     # ======================= Benchmark with drift disabled =======================
     print("Benchmarking expert with drift disabled...")
@@ -89,7 +95,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=easy_difficulty,
         data_path=easy_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 1 (Medium)
     print("Benchmarking expert on difficulty 1 (Medium)...")
@@ -99,7 +105,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=medium_difficulty,
         data_path=medium_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 2 (Hard)
     print("Benchmarking expert on difficulty 2 (Hard)...")
@@ -109,7 +115,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=hard_difficulty,
         data_path=hard_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 3 (SuperTux)
     print("Benchmarking expert on difficulty 3 (SuperTux)...")
@@ -119,7 +125,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=supertux_difficulty,
         data_path=supertux_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # ======================= Benchmark with drift enabled =======================
     print("Benchmarking expert with drift enabled...")
@@ -132,7 +138,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=easy_difficulty,
         data_path=easy_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 1 (Medium)
     print("Benchmarking expert on difficulty 1 (Medium)...")
@@ -142,7 +148,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=medium_difficulty,
         data_path=medium_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 2 (Hard)
     print("Benchmarking expert on difficulty 2 (Hard)...")
@@ -152,7 +158,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=hard_difficulty,
         data_path=hard_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Difficulty 3 (SuperTux)
     print("Benchmarking expert on difficulty 3 (SuperTux)...")
@@ -162,7 +168,7 @@ def benchmark_expert(data_folder: str, nb_races_per_difficulty: int = 100):
         difficulty=supertux_difficulty,
         data_path=supertux_difficulty_path,
         enable_drift=enable_drift,
-        nb_races=nb_races_per_difficulty
+        nb_races_per_track=nb_races_per_track
     )
     # Done
     print("Benchmarking completed!")
@@ -178,15 +184,15 @@ if __name__ == "__main__":
         help="Folder to save the benchmark results"
     )
     parser.add_argument(
-        "--nb-races-per-difficulty",
+        "--nb-races-per-track",
         "-n",
         type=int,
-        default=100,
-        help="Number of races to run per difficulty level"
+        default=10,
+        help="Number of races to run per track"
     )
     args = parser.parse_args()
 
     benchmark_expert(
         data_folder=args.data_folder,
-        nb_races_per_difficulty=args.nb_races_per_difficulty
+        nb_races_per_track=args.nb_races_per_track
     )
