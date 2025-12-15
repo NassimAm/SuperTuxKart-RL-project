@@ -509,7 +509,7 @@ class ExpertAgent:
         #         self.__handle_swatter(state, action, items_to_collect)
         # elif state['powerup'] == Powerup.RUBBERBALL:
         #     action['fire'] = True
-        if state['time_since_last_fire'] > 1.0:
+        if state['time_since_last_fire'] > 1.5:
             action['fire'] = True  # NOTE: powerup observation is not refering to powerup but to number of powerups, so always fire if we have any
 
     def __handle_bubblegum(self, state: State, action: Action, items_to_collect: list[tuple[int, int]],
