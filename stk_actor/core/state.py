@@ -213,6 +213,8 @@ class State(TypedDict):
     """Direction of the skid: -1 for left, 1 for right, 0 for no skid."""
     time_since_last_fire: float
     """Time since the last fire action."""
+    time_since_skid_start: float
+    """Time since the skid started."""
     prev_actions: list[Action]
     """List of previous actions taken."""
     # Expert observations ===========================
@@ -220,8 +222,6 @@ class State(TypedDict):
     """Current lap number."""
     game_time: float
     """Current game time."""
-    time_since_skid_start: float
-    """Time since the skid started."""
     track_direction: DirectionType
     """Current direction of the track."""
     speed_radius_ratio: float
@@ -402,67 +402,120 @@ class State(TypedDict):
             'prev_actions': [Action.to_array(a) for a in state['prev_actions']]
         }
 
-    def to_model(state: 'State') -> torch.Tensor:
+    def to_model(state: 'State', all_features: bool = False) -> torch.Tensor:
         """Convert the state to the model's expected format."""
-        # Items can be very far so we clip distances to a max value
-        max_item_distance = 50.0
-        items_position = state['items_position'].copy()
-        items_position[:, 2] = np.clip(items_position[:, 2], 0.0, max_item_distance)
-        # Karts can be very far so we clip distances to a max value
-        max_kart_distance = 50.0
-        karts_position = state['karts_position'].copy()
-        karts_position[:, 2] = np.clip(karts_position[:, 2], 0.0, max_kart_distance)
-        karts_distance = np.clip(state['karts_distance'], 0.0, max_kart_distance)
-        return torch.concat([
-            # Race stats
-            torch.tensor([state['rank']], dtype=torch.float32),
-            torch.tensor([state['distance_down_track']], dtype=torch.float32),
-            torch.tensor([int(state['phase'].value > Phase.READY_PHASE.value)], dtype=torch.float32),
-            torch.tensor([int(state['should_accelerate_in_start'])], dtype=torch.float32),
-            # Kart internal state
-            torch.tensor(state['velocity'].reshape(-1), dtype=torch.float32),
-            torch.tensor([int(state['jumping'])], dtype=torch.float32),
-            torch.tensor([int(state['is_on_road'])], dtype=torch.float32),
-            torch.tensor([int(state['stuck'])], dtype=torch.float32),
-            torch.tensor([state['time_since_stuck']], dtype=torch.float32),
-            torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
-            # Important data for steering
-            torch.tensor(state['target_position'].reshape(-1), dtype=torch.float32),  # clip?
-            torch.tensor([state['max_steer_angle']], dtype=torch.float32),
-            torch.tensor([state['center_path_distance']], dtype=torch.float32),
-            torch.tensor([state['paths_width'][0]], dtype=torch.float32),
-            # Important data for avoiding obstacles
-            torch.tensor([int(state['avoid_obstacle'])], dtype=torch.float32),
-            torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),  # clip?
-            torch.tensor(state['obstacle_velocity'].reshape(-1), dtype=torch.float32),
-            # Important data for braking
-            torch.tensor([state['speed_radius_ratio']], dtype=torch.float32),
-            # Important data for drifting
-            torch.tensor(state['track_direction'].encode(), dtype=torch.float32),
-            torch.tensor([state['curve_duration']], dtype=torch.float32),
-            torch.tensor([state['skid_direction']], dtype=torch.float32),
-            torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
-            torch.tensor([state['skeed_factor']], dtype=torch.float32),
-            # Powerup
-            torch.tensor(state['powerup'].encode(), dtype=torch.float32),
-            # Attachment
-            torch.tensor(state['attachment'].encode(), dtype=torch.float32),
-            torch.tensor([state['attachment_time_left']], dtype=torch.float32),
-            # Nitro and Zipper
-            torch.tensor([state['energy']], dtype=torch.float32),
-            torch.tensor([state['nitro_duration_time_left']], dtype=torch.float32),
-            torch.tensor([state['nitro_fadeout_time_left']], dtype=torch.float32),
-            torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
-            torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
-            # Items
-            torch.tensor(items_position.reshape(-1), dtype=torch.float32),
-            torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
-            # Other karts
-            torch.tensor(karts_position.reshape(-1), dtype=torch.float32),
-            torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
-            torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
-            torch.tensor(karts_distance.reshape(-1), dtype=torch.float32),
-            torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
-            # Previous actions
-            torch.cat([Action.to_model(a) for a in state['prev_actions']])
-        ])
+        if not all_features:
+            # Items can be very far so we clip distances to a max value
+            max_item_distance = 50.0
+            items_position = state['items_position'].copy()
+            items_position[:, 2] = np.clip(items_position[:, 2], 0.0, max_item_distance)
+            # Karts can be very far so we clip distances to a max value
+            max_kart_distance = 50.0
+            karts_position = state['karts_position'].copy()
+            karts_position[:, 2] = np.clip(karts_position[:, 2], 0.0, max_kart_distance)
+            karts_distance = np.clip(state['karts_distance'], 0.0, max_kart_distance)
+            return torch.concat([
+                # Race stats
+                torch.tensor([state['rank']], dtype=torch.float32),
+                torch.tensor([state['distance_down_track']], dtype=torch.float32),
+                torch.tensor([int(state['phase'].value > Phase.READY_PHASE.value)], dtype=torch.float32),
+                torch.tensor([int(state['should_accelerate_in_start'])], dtype=torch.float32),
+                # Kart internal state
+                torch.tensor(state['velocity'].reshape(-1), dtype=torch.float32),
+                torch.tensor([int(state['jumping'])], dtype=torch.float32),
+                torch.tensor([int(state['is_on_road'])], dtype=torch.float32),
+                torch.tensor([int(state['stuck'])], dtype=torch.float32),
+                torch.tensor([state['time_since_stuck']], dtype=torch.float32),
+                torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
+                # Important data for steering
+                torch.tensor(state['target_position'].reshape(-1), dtype=torch.float32),  # clip?
+                torch.tensor([state['max_steer_angle']], dtype=torch.float32),
+                torch.tensor([state['center_path_distance']], dtype=torch.float32),
+                torch.tensor([state['paths_width'][0]], dtype=torch.float32),
+                # Important data for avoiding obstacles
+                torch.tensor([int(state['avoid_obstacle'])], dtype=torch.float32),
+                torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),  # clip?
+                torch.tensor(state['obstacle_velocity'].reshape(-1), dtype=torch.float32),
+                # Important data for braking
+                torch.tensor([state['speed_radius_ratio']], dtype=torch.float32),
+                # Important data for drifting
+                torch.tensor(state['track_direction'].encode(), dtype=torch.float32),
+                torch.tensor([state['curve_duration']], dtype=torch.float32),
+                torch.tensor([state['skid_direction']], dtype=torch.float32),
+                torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
+                torch.tensor([state['skeed_factor']], dtype=torch.float32),
+                # Powerup
+                torch.tensor(state['powerup'].encode(), dtype=torch.float32),
+                # Attachment
+                torch.tensor(state['attachment'].encode(), dtype=torch.float32),
+                torch.tensor([state['attachment_time_left']], dtype=torch.float32),
+                # Nitro and Zipper
+                torch.tensor([state['energy']], dtype=torch.float32),
+                torch.tensor([state['nitro_duration_time_left']], dtype=torch.float32),
+                torch.tensor([state['nitro_fadeout_time_left']], dtype=torch.float32),
+                torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
+                torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
+                # Items
+                torch.tensor(items_position.reshape(-1), dtype=torch.float32),
+                torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
+                # Other karts
+                torch.tensor(karts_position.reshape(-1), dtype=torch.float32),
+                torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
+                torch.tensor(karts_distance.reshape(-1), dtype=torch.float32),
+                torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
+                # Previous actions
+                torch.cat([Action.to_model(a) for a in state['prev_actions']])
+            ])
+        else:
+            # Use all features
+            return torch.concat([
+                torch.tensor([state['rank']], dtype=torch.float32),
+                torch.tensor(state['attachment'].encode(), dtype=torch.float32),
+                torch.tensor([state['attachment_time_left']], dtype=torch.float32),
+                torch.tensor([state['aux_ticks']], dtype=torch.float32),
+                torch.tensor(state['center_path'].reshape(-1), dtype=torch.float32),
+                torch.tensor([state['center_path_distance']], dtype=torch.float32),
+                torch.tensor([state['distance_down_track']], dtype=torch.float32),
+                torch.tensor([state['overall_distance_ratio']], dtype=torch.float32),
+                torch.tensor([state['full_track_distance']], dtype=torch.float32),
+                torch.tensor([state['energy']], dtype=torch.float32),
+                torch.tensor(state['front'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['items_position'].reshape(-1), dtype=torch.float32),
+                torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
+                torch.tensor([int(state['jumping'])], dtype=torch.float32),
+                torch.tensor([int(state['is_on_road'])], dtype=torch.float32),
+                torch.tensor([int(state['stuck'])], dtype=torch.float32),
+                torch.tensor([state['time_since_stuck']], dtype=torch.float32),
+                torch.tensor(state['karts_position'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['karts_distance'].reshape(-1), dtype=torch.float32),
+                torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
+                torch.tensor([state['max_steer_angle']], dtype=torch.float32),
+                torch.tensor(state['paths_distance'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['paths_end'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['paths_start'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['paths_width'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['phase'].encode(), dtype=torch.float32),
+                torch.tensor([int(state['should_accelerate_in_start'])], dtype=torch.float32),
+                torch.tensor(state['powerup'].encode(), dtype=torch.float32),
+                torch.tensor([state['shield_time']], dtype=torch.float32),
+                torch.tensor([state['skeed_factor']], dtype=torch.float32),
+                torch.tensor(state['velocity'].reshape(-1), dtype=torch.float32),
+                torch.tensor([state['nitro_duration_time_left']], dtype=torch.float32),
+                torch.tensor([state['nitro_fadeout_time_left']], dtype=torch.float32),
+                torch.tensor([state['zipper_duration_time_left']], dtype=torch.float32),
+                torch.tensor([state['zipper_fadeout_time_left']], dtype=torch.float32),
+                torch.tensor([state['skid_direction']], dtype=torch.float32),
+                torch.tensor([state['time_since_skid_start']], dtype=torch.float32),
+                torch.tensor([state['time_since_last_fire']], dtype=torch.float32),
+                torch.tensor(state['track_direction'].encode(), dtype=torch.float32),
+                torch.tensor([state['speed_radius_ratio']], dtype=torch.float32),
+                torch.tensor(state['target_position'].reshape(-1), dtype=torch.float32),
+                torch.tensor([state['curve_duration']], dtype=torch.float32),
+                torch.tensor([int(state['avoid_obstacle'])], dtype=torch.float32),
+                torch.tensor(state['obstacle_position'].reshape(-1), dtype=torch.float32),
+                torch.tensor(state['obstacle_velocity'].reshape(-1), dtype=torch.float32),
+                torch.cat([Action.to_model(a) for a in state['prev_actions']])
+            ])

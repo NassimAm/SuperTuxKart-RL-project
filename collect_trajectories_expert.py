@@ -16,7 +16,7 @@ import argparse
 
 def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_items: bool = True,
                          avoid_karts: bool = True, use_nitro: bool = True, use_items: bool = True,
-                         difficulty: int = 2):
+                         difficulty: int = 2, all_features: bool = False):
     """"""
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     previous_action_horizon = 1
@@ -64,7 +64,7 @@ def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_it
 
         # Save locally every 10000 steps
         if i % 100000 == 0 and i > 0:
-            state_array = np.concat([State.to_model(State.from_env(s)).numpy().reshape(1, -1) for s in states])
+            state_array = np.concat([State.to_model(State.from_env(s), all_features=all_features).numpy().reshape(1, -1) for s in states])
             actions_array = np.concat([Action.to_model(Action.from_env(a)).numpy().reshape(1, -1) for a in actions])
             rewards_array = np.array(rewards)
             terminateds_array = np.array(terminateds)
@@ -138,10 +138,16 @@ if __name__ == "__main__":
         default=2,
         help="Difficulty level of the STK Bot.",
     )
+    parser.add_argument(
+        "--all_features",
+        action="store_true",
+        help="Whether to use all features in the state representation.",
+    )
     args = parser.parse_args()
     collect_trajectories(args.data_path, enable_drift=not args.no_drift,
                          avoid_bad_items=not args.no_avoid_bad_items,
                          avoid_karts=not args.no_avoid_karts,
                          use_nitro=not args.no_use_nitro,
                          use_items=not args.no_use_items,
-                         difficulty=args.difficulty)
+                         difficulty=args.difficulty,
+                         all_features=args.all_features)
