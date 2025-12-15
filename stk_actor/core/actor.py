@@ -1,7 +1,7 @@
 import torch
-from core.nn import ActorMLP
-from core.state import State
-from core.action import Action
+from .nn import ActorMLP
+from .state import State
+from .action import Action
 
 
 class Actor:

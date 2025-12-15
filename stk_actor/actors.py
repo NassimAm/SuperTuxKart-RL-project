@@ -1,6 +1,10 @@
 import gymnasium as gym
 from bbrl.agents import Agent
 import torch
+from .core.state import State
+# from .core.action import Action
+from .core.nn import ActorMLP
+from .core.expert import ExpertAgent
 
 
 class MyWrapper(gym.ActionWrapper):
@@ -16,9 +20,24 @@ class MyWrapper(gym.ActionWrapper):
 class Actor(Agent):
     """Computes probabilities over action"""
 
+    def __init__(self, name, observation_space, action_space):
+        super().__init__(name)
+        self.expert = ExpertAgent(avoid_karts=False)
+        self.model = ActorMLP(input_dim=179, hidden_dim=512)
+
+    def load_state_dict(self, state: dict):
+        self.model.load_state_dict(state)
+
     def forward(self, t: int):
-        # Computes probabilities over actions
-        raise NotImplementedError()
+        obs = {key: self.get((f'env/env_obs/{key}', t))[0].numpy() for key in State.KEYS}
+        # state_obj = State.from_env(obs)
+        # state_tensor = State.to_model(state_obj).unsqueeze(0)  # Add batch dimension
+        # with torch.no_grad():
+        #     pred_action = torch.cat(self.model(state_tensor))
+        #     action_obj = Action.from_model(pred_action)
+        action = self.expert.act(obs)
+        for key, value in action.items():
+            self.set((f'action/{key}', t), torch.tensor([value]))
 
 
 class ArgmaxActor(Agent):
@@ -26,7 +45,7 @@ class ArgmaxActor(Agent):
 
     def forward(self, t: int):
         # Selects the best actions according to the policy
-        raise NotImplementedError()
+        pass
 
 
 class SamplingActor(Agent):
@@ -37,4 +56,6 @@ class SamplingActor(Agent):
         self.action_space = action_space
 
     def forward(self, t: int):
-        self.set(("action", t), torch.LongTensor([self.action_space.sample()]))
+        action = self.action_space.sample()
+        for key, value in action.items():
+            self.set((f'action/{key}', t), torch.tensor([value.item()]))

@@ -1,13 +1,13 @@
 import numpy as np
 from enum import Enum
 from typing import TypedDict, Optional
-from core.state import State, Phase, Attachment, Powerup, ItemType
-from core.action import Action
+from .state import State, Phase, Attachment, Powerup, ItemType
+from .action import Action
+from .utils import from_polar_to_cartesian, get_xz_angle_between
 import json
 from gymnasium import Env
 from pystk2_gymnasium.envs import STKRaceEnv
 import random
-from core.utils import from_polar_to_cartesian, get_xz_angle_between
 
 
 class CrashType:

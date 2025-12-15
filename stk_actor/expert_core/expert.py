@@ -1,7 +1,7 @@
 import math
-from core.state import State, Phase, Attachment, Powerup, ItemType, DirectionType
-from core.action import Action
-from core.utils import from_polar_to_cartesian, get_xz_angle_between
+from .state import State, Phase, Attachment, Powerup, ItemType, DirectionType
+from .action import Action
+from .utils import from_polar_to_cartesian, get_xz_angle_between
 from typing import Optional
 import numpy as np
 from gymnasium import Env
