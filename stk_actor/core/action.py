@@ -53,7 +53,7 @@ class Action(TypedDict):
             look_back=False
         )
 
-    def to_env(action: 'Action') -> np.ndarray:
+    def to_env(action: 'Action'):
         """Convert the action to the environment's expected format."""
         return {
             'acceleration': action['acceleration'],
