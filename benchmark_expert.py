@@ -1,8 +1,8 @@
 import gymnasium as gym
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
-from core.expert import ExpertAgent
+from stk_actor.core.wrappers import EnhanceObservations1, EnhanceObservations2, CustomPolarObservations, StuckObservations, ExpertObservations
+from stk_actor.core.expert import ExpertAgent
 import numpy as np
 from tqdm import tqdm
 import argparse
@@ -20,10 +20,11 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
     # Load the environment
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     wrappers = [
+        lambda env: EnhanceObservations1(env),
         lambda env: ConstantSizedObservations(env, state_paths=10),
-        lambda env: EnhanceObservations(env),
+        lambda env: EnhanceObservations2(env, previous_action_horizon=1),
         lambda env: StuckObservations(env),
-        lambda env: ExpertObservations(env),
+        lambda env: ExpertObservations(env, avoid_karts=False),
         lambda env: CustomPolarObservations(env)
     ]
     for wrapper in wrappers:
@@ -31,7 +32,7 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
     # Get list of tracks
     tracks = env.unwrapped.TRACKS
     # Create the expert agent
-    expert = ExpertAgent(env, enable_drift=enable_drift)
+    expert = ExpertAgent(difficulty=difficulty, enable_drift=enable_drift, avoid_karts=False)
     # Run multiple trials
     nb_trials = nb_races_per_track * len(tracks)
     tqdm_bar = tqdm(range(nb_trials), desc="Trials")
