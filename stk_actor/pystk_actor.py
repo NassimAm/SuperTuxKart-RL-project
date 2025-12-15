@@ -6,7 +6,7 @@ import gymnasium as gym
 # IMPORTANT: note the relative import
 from .actors import Actor, ArgmaxActor, SamplingActor
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from .core.wrappers import EnhanceObservations1, EnhanceObservations2, CustomPolarObservations, StuckObservations, ExpertObservations
+from .core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
 
 #: The base environment name (you can change that)
 env_name = "supertuxkart/full-v0"
@@ -19,11 +19,10 @@ def get_wrappers() -> List[Callable[[gym.Env], gym.Wrapper]]:
     """Returns a list of additional wrappers to be applied to the base
     environment"""
     return [
-        lambda env: EnhanceObservations1(env),
         lambda env: ConstantSizedObservations(env, state_paths=10),
-        lambda env: EnhanceObservations2(env, previous_action_horizon=1),
-        lambda env: StuckObservations(env),
-        lambda env: ExpertObservations(env, avoid_karts=False),
+        lambda env: EnhanceObservations(env, previous_action_horizon=1, eval=True),
+        lambda env: StuckObservations(env, eval=True),
+        lambda env: ExpertObservations(env),
         lambda env: CustomPolarObservations(env)
     ]
 
@@ -40,7 +39,7 @@ def get_actor(
     :param action_space: The environment action space (with wrappers)
     :return: a BBRL agent
     """
-    actor = Actor(player_name, observation_space, action_space)
+    actor = Actor(observation_space, action_space)
 
     # Returns a dummy actor
     if state is None:

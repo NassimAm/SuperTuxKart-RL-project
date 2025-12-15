@@ -4,8 +4,6 @@ from .action import Action
 from .utils import from_polar_to_cartesian, get_xz_angle_between
 from typing import Optional
 import numpy as np
-from gymnasium import Env
-from pystk2_gymnasium.envs import STKRaceEnv
 
 
 class ExpertAgent:
@@ -13,8 +11,6 @@ class ExpertAgent:
     simplified implementation inspired from the original C++ expert agent from SuperTuxKart. The original code that we are
     referring to can be found here https://github.com/bpiwowar/pystk2/blob/master/src/karts/controller/skidding_ai.cpp"""
 
-    env: STKRaceEnv
-    """The environment in which the agent operates."""
     enable_drift: bool
     """Whether to enable drifting behavior."""
     avoid_bad_items: bool
@@ -32,6 +28,8 @@ class ExpertAgent:
     path_decision_angle: int = 45  # degrees
     """The angle threshold for path decision-making."""
 
+    # ============================== Race characteristics ==============================
+    STEP_SIZE = 0.1  # seconds
     # ============================== Path characteristics ==============================
     MAX_STRAIGHT_ANGLE = 0.1  # radians
     # ============================== Kart characteristics ==============================
@@ -85,7 +83,7 @@ class ExpertAgent:
     # firing
     MAX_TIME_SINCE_LAST_FIRE = 5.0  # seconds
 
-    def __init__(self, env: Env, enable_drift: bool = True,
+    def __init__(self, difficulty: int = 2, enable_drift: bool = True,
                  avoid_bad_items: bool = True, avoid_karts: bool = True,
                  use_nitro: bool = True, use_items: bool = True, collect_items: bool = False,
                  path_decision_angle: int = 45):
@@ -98,8 +96,7 @@ class ExpertAgent:
             use_nitro (bool): Whether to use nitro boosts. Default is True.
             use_items (bool): Whether to use items on the track. Default is True.
         """
-        self.env = env.unwrapped
-        self.max_speed = ExpertAgent.MAX_SPEED * ExpertAgent.MAX_SPEED_FACTORS[self.env.difficulty]
+        self.max_speed = ExpertAgent.MAX_SPEED * ExpertAgent.MAX_SPEED_FACTORS[difficulty]
         self.enable_drift = enable_drift
         self.avoid_bad_items = avoid_bad_items
         self.avoid_karts = avoid_karts
@@ -180,8 +177,8 @@ class ExpertAgent:
         if self.use_nitro:
             self.__handle_nitro(state, action, max_turn_speed)
         # Handle zipper
-        if self.use_items:
-            self.__handle_zipper(state, action, track_direction, last_path_id)
+        # if self.use_items:
+        #     self.__handle_zipper(state, action, track_direction, last_path_id)
         # Otherwise, set acceleration to max
         action['acceleration'] = 1.0
 
@@ -239,8 +236,8 @@ class ExpertAgent:
         # If the AI has a lot of nitro, it should consume it without waiting for some fadeout
         big_reserve = False
         # If this kart is the last kart, set nitro reserve to be at most 2
-        if state['rank'] == 0.0:
-            energy_reserve = 2
+        # if state['rank'] == 0.0:
+        #     energy_reserve = 2
         # Estimate time towards the end of the race.
         # Decreases the reserve size when there is an estimate of time remaining
         # to the end of less than 2,5 times the maximum nitro effect duration.
@@ -266,9 +263,9 @@ class ExpertAgent:
         # If trying to pass a bomb to a kart faster or far ahead, use nitro reserve
         speed = state['velocity'][2]
         if (state['attachment'] == Attachment.BOMB) and (energy_reserve > 0):
-            karts_rel_rank = state['karts_rel_rank']
-            kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
-            if (kart_ahead_id is not None) and ((state['karts_distance'][kart_ahead_id] > 10.0) or (state['karts_velocity'][kart_ahead_id][2] > speed)):
+            karts_position = state['karts_position']
+            kart_ahead_id = next((i for i in range(len(karts_position)) if abs(karts_position[i][0]) < (np.pi / 2.0)), None)
+            if (kart_ahead_id is not None) and (state['karts_position'][kart_ahead_id][2] > 10.0):
                 energy_reserve = 0
         # Don't use nitro if building an energy reserve
         if state['energy'] <= energy_reserve:
@@ -306,7 +303,7 @@ class ExpertAgent:
                 assert last_path_id is not None, "last_path_id should not be None here"
                 last_path_center = (from_polar_to_cartesian(state['paths_start'][last_path_id]) + from_polar_to_cartesian(state['paths_end'][last_path_id])) / 2.0
                 diff = np.linalg.norm(last_path_center).item()
-                if diff > (speed + ExpertAgent.ZIPPER_MAX_SPEED_INCREASE) * self.env.config.step_size * 2.5:
+                if diff > (speed + ExpertAgent.ZIPPER_MAX_SPEED_INCREASE) * ExpertAgent.STEP_SIZE * 2.5:
                     action['fire'] = True
                     return
 
@@ -484,38 +481,36 @@ class ExpertAgent:
             items_to_avoid (list[tuple[int, int]]): List to store item IDs to avoid and their associated path IDs.
         """
         # If we don't have a powerup, nothing to do
-        if state['powerup'] == Powerup.NOTHING:
+        if state['powerup'] == 0:
             return
-        # Get kart ahead ID
-        karts_rel_rank = state['karts_rel_rank']
-        kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
-        # Treat each powerup type accordingly
-        if state['powerup'] == Powerup.BUBBLEGUM:
-            self.__handle_bubblegum(state, action, items_to_collect, items_to_avoid)
-        elif state['powerup'] == Powerup.CAKE:
-            self.__handle_cake(state, action)
-        elif state['powerup'] == Powerup.BOWLING:
-            self.__handle_bowling(state, action)
-        elif state['powerup'] == Powerup.PLUNGER:
-            kart_ahead_distance = state['karts_distance'][kart_ahead_id] if kart_ahead_id is not None else float('inf')
-            if kart_ahead_distance < 30.0:
-                action['fire'] = True
-        elif state['powerup'] == Powerup.SWITCH:
-            self.__handle_switch(state, action, items_to_avoid)
-        elif state['powerup'] == Powerup.PARACHUTE:
-            # Wait until a previous parachute effect is gone
-            if state['time_since_last_fire'] > ExpertAgent.PARACHUTE_DURATION_OTHER:
-                action['fire'] = True
-        elif state['powerup'] == Powerup.SWATTER:
-            # if the kart has a shield, do not break it by using a swatter
-            if state['attachment'] != Attachment.BUBBLEGUM_SHIELD:
-                self.__handle_swatter(state, action, items_to_collect)
-        elif state['powerup'] == Powerup.RUBBERBALL:
-            # Perhaps some more sophisticated algorithm might be useful.
-            # For now: fire if there is a kart ahead (which means that
-            # this kart is certainly not the first kart)
-            if state['rank'] != 1.0:
-                action['fire'] = True
+        # # Get kart ahead ID
+        # karts_position = state['karts_position']
+        # kart_ahead_id = next((i for i in range(len(karts_position)) if abs(karts_position[i][0]) < (np.pi / 2.0)), None)
+        # # Treat each powerup type accordingly
+        # if state['powerup'] == Powerup.BUBBLEGUM:
+        #     self.__handle_bubblegum(state, action, items_to_collect, items_to_avoid)
+        # elif state['powerup'] == Powerup.CAKE:
+        #     self.__handle_cake(state, action)
+        # elif state['powerup'] == Powerup.BOWLING:
+        #     self.__handle_bowling(state, action)
+        # elif state['powerup'] == Powerup.PLUNGER:
+        #     kart_ahead_distance = state['karts_position'][kart_ahead_id][2] if kart_ahead_id is not None else float('inf')
+        #     if kart_ahead_distance < 30.0:
+        #         action['fire'] = True
+        # elif state['powerup'] == Powerup.SWITCH:
+        #     self.__handle_switch(state, action, items_to_avoid)
+        # elif state['powerup'] == Powerup.PARACHUTE:
+        #     # Wait until a previous parachute effect is gone
+        #     if state['time_since_last_fire'] > ExpertAgent.PARACHUTE_DURATION_OTHER:
+        #         action['fire'] = True
+        # elif state['powerup'] == Powerup.SWATTER:
+        #     # if the kart has a shield, do not break it by using a swatter
+        #     if state['attachment'] != Attachment.BUBBLEGUM_SHIELD:
+        #         self.__handle_swatter(state, action, items_to_collect)
+        # elif state['powerup'] == Powerup.RUBBERBALL:
+        #     action['fire'] = True
+        if state['time_since_last_fire'] > 1.5:
+            action['fire'] = True  # NOTE: powerup observation is not refering to powerup but to number of powerups, so always fire if we have any
 
     def __handle_bubblegum(self, state: State, action: Action, items_to_collect: list[tuple[int, int]],
                            items_to_avoid: list[tuple[int, int]]):
@@ -541,13 +536,13 @@ class ExpertAgent:
         speed = state['velocity'][2]
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_avoid) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_avoid[0][0]]))
-            if (speed > 0) and (((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
+            if (speed > 0) and (((d - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < ExpertAgent.STEP_SIZE * 2.5):
                 action['fire'] = True
                 return
         # Use shield if kart is going to hit an item box
         if (state['attachment'] != Attachment.BUBBLEGUM_SHIELD) and (len(items_to_collect) > 0):
             d = np.linalg.norm(from_polar_to_cartesian(state['items_position'][items_to_collect[0][0]]))
-            if (state['items_type'][items_to_collect[0][0]] == ItemType.BONUS_BOX) and (speed > 0) and (((d - ExpertAgent.KART_LENGTH / 2.0 - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < self.env.config.step_size * 2.5):
+            if (state['items_type'][items_to_collect[0][0]] == ItemType.BONUS_BOX) and (speed > 0) and (((d - ExpertAgent.KART_LENGTH / 2.0 - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed) < ExpertAgent.STEP_SIZE * 2.5):
                 action['fire'] = True
                 return
         # Use bubblegum if the any kart behind is 'close' and straight behind
@@ -675,7 +670,7 @@ class ExpertAgent:
                     angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), pos)
                     # If we would reach the item soon (within 4 steps), use the switch
                     dist_to_item = np.linalg.norm(pos).item()
-                    if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 4):
+                    if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < ExpertAgent.STEP_SIZE * 4):
                         action['fire'] = True
                         return
 
@@ -702,7 +697,7 @@ class ExpertAgent:
                 pos = from_polar_to_cartesian(state['items_position'][item_id])
                 angle = get_xz_angle_between(np.array([0.0, 0.0, 1.0]), pos)
                 dist_to_item = np.linalg.norm(pos).item()
-                if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < self.env.config.step_size * 3):
+                if (abs(angle) < 0.3) and (speed > 0) and ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM) / speed < ExpertAgent.STEP_SIZE * 3):
                     has_bonus_box_ahead = True
                     break
         if has_bonus_box_ahead or ((attachment == Attachment.BOMB) and (state['attachment_time_left'] < 10.0)):
@@ -739,7 +734,7 @@ class ExpertAgent:
                 if abs(angle) < 0.3:
                     dist_to_item = np.linalg.norm(item_to_avoid_position).item()
                     nb_max_steps = 4
-                    nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.config.step_size
+                    nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / ExpertAgent.STEP_SIZE
                     if nb_steps_to_reach < nb_max_steps:
                         # Compute two possible avoidance target points aside the item (left and right)
                         avoid_target_point_1 = item_to_avoid_position - np.array([ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM + ExpertAgent.KART_WIDTH / 2.0 + 2.0, 0.0, 0.0])
@@ -756,7 +751,7 @@ class ExpertAgent:
         # as we may want to hit them on purpose to pass the bomb to them
         if self.avoid_karts and (state['attachment'] != Attachment.BOMB):
             for i, kart_pos in enumerate(state['karts_position']):
-                if state['karts_rel_rank'][i] < 0:
+                if state['karts_position'][i][2] < 0:
                     continue  # Only consider karts ahead
                 kart_speed = state['karts_velocity'][i][2]
                 relative_speed = speed - kart_speed
@@ -767,7 +762,7 @@ class ExpertAgent:
                 if abs(angle) < 0.3:
                     dist_to_kart = np.linalg.norm(kart_position).item()
                     nb_max_steps = 4
-                    nb_steps_to_reach = ((dist_to_kart - ExpertAgent.KART_LENGTH) / relative_speed) / self.env.config.step_size
+                    nb_steps_to_reach = ((dist_to_kart - ExpertAgent.KART_LENGTH) / relative_speed) / ExpertAgent.STEP_SIZE
                     if nb_steps_to_reach < nb_max_steps:
                         # Compute two possible avoidance target points aside the kart (left and right)
                         avoid_target_point_1 = kart_position - np.array([ExpertAgent.KART_WIDTH + 2.0, 0.0, 0.0])
@@ -789,7 +784,7 @@ class ExpertAgent:
                 else:
                     dist_to_item = np.linalg.norm(item_to_collect_position).item()
                     nb_max_steps = 4
-                    nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / self.env.config.step_size
+                    nb_steps_to_reach = ((dist_to_item - ExpertAgent.DISTANCE_ASIDE_TO_AVOID_ITEM - ExpertAgent.KART_LENGTH / 2.0) / speed) / ExpertAgent.STEP_SIZE
                     if nb_steps_to_reach < nb_max_steps:
                         return item_to_collect_position + np.array([2.0, 0.0, 0.0]) * np.sign(item_to_collect_position[0])
         # Return the new target point
@@ -1032,7 +1027,7 @@ class ExpertAgent:
         Returns:
             float: The adjusted steering value for drifting.
         """
-        if state['time_since_skid_start'] < 3 * self.env.config.step_size:
+        if state['time_since_skid_start'] < 3 * ExpertAgent.STEP_SIZE:
             return steering  # no adjustment on the first frames of drifting
         delta = ExpertAgent.SKID_REDUCE_TURN_MAX - ExpertAgent.SKID_REDUCE_TURN_MIN
         if state['skid_direction'] == 0:  # not skidding
@@ -1047,10 +1042,9 @@ class ExpertAgent:
     def __estimate_finish_time(self, state: State):
         """Estimates the time remaining to finish the race based on the current state."""
         # Get full distance of the race
-        track_length = self.env.track.length
-        full_distance = self.env.config.laps * track_length
+        full_distance = state['track_length']
         # Get full distance covered by the kart
-        kart_overall_distance = state['overall_distance_ratio'] * full_distance
+        kart_overall_distance = state['distance_down_track']
         # Get average speed of the kart over all the race so far
         average_speed = 1.0 if state['game_time'] == 0 else (kart_overall_distance / state['game_time'])
         # Calculate estimated finish time

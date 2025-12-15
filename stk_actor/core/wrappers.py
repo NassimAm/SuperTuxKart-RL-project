@@ -1,60 +1,39 @@
 from gymnasium import Env, ObservationWrapper
 from gymnasium.spaces import Box, Discrete
 from pystk2_gymnasium.definitions import ActionObservationWrapper
-from .state import Phase, Attachment, DirectionType, ItemType
+from .state import Phase, Powerup, Attachment, DirectionType, ItemType
 from .action import Action
 from .expert import ExpertAgent
-from .utils import from_cartesian_to_polar, get_xz_angle_between
+from .utils import from_cartesian_to_polar, get_xz_angle_between, rotate
 from copy import deepcopy
 import numpy as np
 from typing import Optional
 
 
-# def kartview(env, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation: bool = True):
-#     """Returns a vector in the kart frame (X right, Y up, Z forwards)
+def kartview(kart, x, make_relative_to_kart: bool = True, adapt_to_kart_rotation: bool = True):
+    """Returns a vector in the kart frame (X right, Y up, Z forwards)
 
-#     Args:
-#         env (Env): The environment.
-#         x (np.ndarray): The vector to convert.
-#         make_relative_to_kart (bool): Whether to make the vector relative to the kart position.
-#         adapt_to_kart_rotation (bool): Whether to adapt the vector to the kart rotation.
+    Args:
+        env (Env): The environment.
+        x (np.ndarray): The vector to convert.
+        make_relative_to_kart (bool): Whether to make the vector relative to the kart position.
+        adapt_to_kart_rotation (bool): Whether to adapt the vector to the kart rotation.
 
-#     Returns:
-#         np.ndarray: The vector in the kart frame.
-#     """
-#     kart = env.unwrapped.world.karts[env.unwrapped.kart_ix]
-#     x_proj = x
-#     if make_relative_to_kart:
-#         x_proj = x - kart.location
-#     if adapt_to_kart_rotation:
-#         x_proj = rotate(x_proj, kart.rotation)
-#     return x_proj
+    Returns:
+        np.ndarray: The vector in the kart frame.
+    """
+    x_proj = x
+    if make_relative_to_kart:
+        x_proj = x - kart.location
+    if adapt_to_kart_rotation:
+        x_proj = rotate(x_proj, kart.rotation)
+    return x_proj
 
 
-class EnhanceObservations1(ObservationWrapper):
+class EnhanceObservations(ActionObservationWrapper):
     """An observation wrapper that adds more informative observations."""
 
-    def __init__(self, env):
-        super().__init__(env)
-        self.observation_space = deepcopy(env.observation_space)
-        # Add track length
-        self.observation_space['track_length'] = Box(
-            low=0.0,
-            high=float('inf'),
-            shape=(),
-            dtype=np.float32,
-        )
-
-    def observation(self, observation):
-        new_obs = {**observation}
-        new_obs['track_length'] = np.max(observation['paths_distance']).item()
-        return new_obs
-
-
-class EnhanceObservations2(ActionObservationWrapper):
-    """An observation wrapper that adds more informative observations."""
-
-    def __init__(self, env: Env, previous_action_horizon: int = 1):
+    def __init__(self, env: Env, previous_action_horizon: int = 1, eval: bool = False):
         """An observation wrapper that adds more informative observations.
 
         Args:
@@ -77,27 +56,27 @@ class EnhanceObservations2(ActionObservationWrapper):
         self.observation_space['should_accelerate_in_start'] = Discrete(
             n=2
         )
-        # # Update with the new powerup state
-        # self.observation_space['powerup'] = Discrete(
-        #     n=len(Powerup)
-        # )
-        # self.prev_powerup = Powerup.NOTHING.value
+        # Update with the new powerup state
+        self.observation_space['powerup'] = Discrete(
+            n=len(Powerup)
+        )
+        self.prev_powerup = Powerup.NOTHING.value
         # Save number of steps to track phases
         self.nb_steps = 0
-        # # Normalized kart position
-        # self.observation_space['rank'] = Box(
-        #     low=0.0,
-        #     high=1.0,
-        #     shape=(),
-        #     dtype=np.float32,
-        # )
-        # # Distance traveled down the track
-        # self.observation_space['distance_down_track'] = Box(
-        #     low=0.0,
-        #     high=1.0,
-        #     shape=(),
-        #     dtype=np.float32,
-        # )
+        # Normalized kart position
+        self.observation_space['rank'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(),
+            dtype=np.float32,
+        )
+        # Distance traveled down the track
+        self.observation_space['distance_down_track'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(),
+            dtype=np.float32,
+        )
         # Overall distance ratio in the race
         self.observation_space['overall_distance_ratio'] = Box(
             low=0.0,
@@ -105,15 +84,21 @@ class EnhanceObservations2(ActionObservationWrapper):
             shape=(),
             dtype=np.float32,
         )
-        # # Current lap number
-        # self.observation_space['current_lap'] = Box(
-        #     low=0,
-        #     high=float('inf'),
-        #     shape=(),
-        #     dtype=np.int32,
-        # )
+        # Full track distance
+        self.observation_space['full_track_distance'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        # Current lap number
+        self.observation_space['current_lap'] = Box(
+            low=0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.int32,
+        )
         # Add game time
-        self.game_time = 0.0
         self.observation_space['game_time'] = Box(
             low=0.0,
             high=float('inf'),
@@ -139,21 +124,21 @@ class EnhanceObservations2(ActionObservationWrapper):
             shape=(),
             dtype=np.float32,
         )
-        # # Add zipper time left
-        # self.zipper_duration_time_left = 0.0
-        # self.observation_space['zipper_duration_time_left'] = Box(
-        #     low=0.0,
-        #     high=float('inf'),
-        #     shape=(),
-        #     dtype=np.float32,
-        # )
-        # self.zipper_fadeout_time_left = 0.0
-        # self.observation_space['zipper_fadeout_time_left'] = Box(
-        #     low=0.0,
-        #     high=float('inf'),
-        #     shape=(),
-        #     dtype=np.float32,
-        # )
+        # Add zipper time left
+        self.zipper_duration_time_left = 0.0
+        self.observation_space['zipper_duration_time_left'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
+        self.zipper_fadeout_time_left = 0.0
+        self.observation_space['zipper_fadeout_time_left'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
         # Path widths
         self.observation_space['paths_width'] = Box(
             low=0.0,
@@ -161,42 +146,42 @@ class EnhanceObservations2(ActionObservationWrapper):
             shape=(self.env.observation_space['paths_start'].shape[0],),
             dtype=np.float32,
         )
-        # # Path distances
-        # self.observation_space['paths_distance'] = Box(
-        #     low=0.0,
-        #     high=1.0,
-        #     shape=(self.env.observation_space['paths_start'].shape[0],),
-        #     dtype=np.float32,
-        # )
+        # Path distances
+        self.observation_space['paths_distance'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(self.env.observation_space['paths_start'].shape[0],),
+            dtype=np.float32,
+        )
         # Add opponent kart relative rank
         self.state_karts = self.env.observation_space['karts_position'].shape[0]
-        # self.observation_space['karts_rel_rank'] = Box(
-        #     low=0.0,
-        #     high=1.0,
-        #     shape=(self.state_karts,),
-        #     dtype=np.float32,
-        # )
-        # # Add opponent karts velocity
-        # self.observation_space['karts_velocity'] = Box(
-        #     low=-float('inf'),
-        #     high=float('inf'),
-        #     shape=(self.state_karts, 3),
-        #     dtype=np.float32,
-        # )
-        # # Add opponent karts distance
-        # self.observation_space['karts_distance'] = Box(
-        #     low=0.0,
-        #     high=float('inf'),
-        #     shape=(self.state_karts,),
-        #     dtype=np.float32,
-        # )
-        # # Add oppponent karts attachement
-        # self.observation_space['karts_attachment'] = Box(
-        #     low=0,
-        #     high=len(Attachment)-1,
-        #     shape=(self.state_karts,),
-        #     dtype=np.int32
-        # )
+        self.observation_space['karts_rel_rank'] = Box(
+            low=0.0,
+            high=1.0,
+            shape=(self.state_karts,),
+            dtype=np.float32,
+        )
+        # Add opponent karts velocity
+        self.observation_space['karts_velocity'] = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(self.state_karts, 3),
+            dtype=np.float32,
+        )
+        # Add opponent karts distance
+        self.observation_space['karts_distance'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(self.state_karts,),
+            dtype=np.float32,
+        )
+        # Add oppponent karts attachement
+        self.observation_space['karts_attachment'] = Box(
+            low=0,
+            high=len(Attachment)-1,
+            shape=(self.state_karts,),
+            dtype=np.int32
+        )
         # Add skid direction
         self.skid_direction = 0
         self.observation_space['skid_direction'] = Box(
@@ -234,8 +219,11 @@ class EnhanceObservations2(ActionObservationWrapper):
         # Workaround to detect env reset
         self.reset_ = True
         self.action_ = None
+        # Env
+        self.is_eval = eval
+        self.race_env = self.env.unwrapped._env.unwrapped if eval else self.env.unwrapped
 
-    def get_new_observation(self, observation, action: Optional[dict] = None, did_nitro: bool = False, reset: bool = False):
+    def get_new_observation(self, observation, action: Optional[dict] = None, did_nitro: bool = False, did_zipper: bool = False, reset: bool = False):
         """Adds more informative observations.
 
         Args:
@@ -263,58 +251,67 @@ class EnhanceObservations2(ActionObservationWrapper):
         else:
             observation['phase'] = Phase.RACE_PHASE.value
             observation['should_accelerate_in_start'] = 1
-        # Powerup representation
-        # powerup = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix].powerup.type.value
-        # observation['powerup'] = powerup
-        # self.prev_powerup = powerup
+        # Get kart index
+        if self.is_eval:
+            my_kart_ix = 0
+            kart_found = False
+            for my_kart_ix, player in enumerate(self.race_env.config.players):
+                if player.name == 'Barouita':  # NOTE: Hardcoded kart name
+                    kart_found = True
+                    break
+            assert kart_found, "Could not find the agent kart with name 'Barouita'"
+        else:
+            my_kart_ix = self.race_env.kart_ix
         # Get kart
-        # kart = self.env.unwrapped.world.karts[self.env.unwrapped.kart_ix]
-        # # Get number of karts
-        # num_karts = self.env.unwrapped.num_kart
-        # # Get unormalized kart rank
-        # rank = kart.position
-        # normalized_rank = 1.0 - ((rank - 1) / (num_karts - 1))  # 0.0 for last, 1.0 for first and others in between
-        # # Add normalized kart rank
-        # observation['rank'] = normalized_rank
+        kart = self.race_env.world.karts[my_kart_ix]
+        # Powerup representation
+        powerup = kart.powerup.type.value
+        observation['powerup'] = powerup
+        self.prev_powerup = powerup
+        # Get number of karts
+        num_karts = self.race_env.num_kart
+        # Get unormalized kart rank
+        rank = kart.position
+        normalized_rank = 1.0 - ((rank - 1) / (num_karts - 1))  # 0.0 for last, 1.0 for first and others in between
+        # Add normalized kart rank
+        observation['rank'] = normalized_rank
         # Add overall distance ratio
-        # overall_distance = max(0.0, kart.overall_distance)
-        # track_length = self.env.unwrapped.track.length
-        # full_distance = self.env.unwrapped.config.laps * track_length
-        # observation['distance_down_track'] = max(0.0, min(kart.distance_down_track / track_length, 1.0))
-        # observation['overall_distance_ratio'] = max(0.0, min(overall_distance / full_distance, 1.0))
-        observation['overall_distance_ratio'] = observation['distance_down_track'] / observation['track_length']
+        overall_distance = max(0.0, kart.overall_distance)
+        track_length = self.race_env.track.length
+        full_distance = self.race_env.config.laps * track_length
+        observation['distance_down_track'] = max(0.0, min(kart.distance_down_track / track_length, 1.0))
+        observation['overall_distance_ratio'] = max(0.0, min(overall_distance / full_distance, 1.0))
+        observation['full_track_distance'] = full_distance
         # Get more accurate paths
         # Start with the current path
-        # current_node = kart.node
-        # current_path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][0])
-        # current_path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[current_node][1])
-        # current_path_width = self.env.unwrapped.track.path_width[current_node]
-        # current_path_distance = self.env.unwrapped.track.path_distance[current_node]
-        # paths_start = [current_path_start]
-        # paths_end = [current_path_end]
-        # paths_width = [current_path_width]
-        # paths_distance = [current_path_distance]
-        # state_paths = observation['paths_start'].shape[0]
-        # for _ in range(1, state_paths):
-        #     successor = self.env.unwrapped.track.successors[current_node][0]  # For simplicity, take the first successor
-        #     path_start = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][0])
-        #     path_end = kartview(self.env, self.env.unwrapped.track.path_nodes[successor][1])
-        #     path_width = self.env.unwrapped.track.path_width[successor]
-        #     path_distance = self.env.unwrapped.track.path_distance[successor]
-        #     paths_start.append(path_start)
-        #     paths_end.append(path_end)
-        #     paths_width.append(path_width)
-        #     paths_distance.append(path_distance)
-        #     current_node = successor
-        # # Convert to numpy arrays
-        # observation['paths_start'] = np.array(paths_start)
-        # observation['paths_end'] = np.array(paths_end)
-        # observation['paths_width'] = np.array(paths_width)
-        # observation['paths_distance'] = np.array(paths_distance)
-        # # Normalize path distances
-        # observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
-        # Ajust path widths
-        observation['paths_width'] = observation['paths_width'][:, 0]
+        current_node = kart.node
+        current_path_start = kartview(kart, self.race_env.track.path_nodes[current_node][0])
+        current_path_end = kartview(kart, self.race_env.track.path_nodes[current_node][1])
+        current_path_width = self.race_env.track.path_width[current_node]
+        current_path_distance = self.race_env.track.path_distance[current_node]
+        paths_start = [current_path_start]
+        paths_end = [current_path_end]
+        paths_width = [current_path_width]
+        paths_distance = [current_path_distance]
+        state_paths = observation['paths_start'].shape[0]
+        for _ in range(1, state_paths):
+            successor = self.race_env.track.successors[current_node][0]  # For simplicity, take the first successor
+            path_start = kartview(kart, self.race_env.track.path_nodes[successor][0])
+            path_end = kartview(kart, self.race_env.track.path_nodes[successor][1])
+            path_width = self.race_env.track.path_width[successor]
+            path_distance = self.race_env.track.path_distance[successor]
+            paths_start.append(path_start)
+            paths_end.append(path_end)
+            paths_width.append(path_width)
+            paths_distance.append(path_distance)
+            current_node = successor
+        # Convert to numpy arrays
+        observation['paths_start'] = np.array(paths_start)
+        observation['paths_end'] = np.array(paths_end)
+        observation['paths_width'] = np.array(paths_width)
+        observation['paths_distance'] = np.array(paths_distance)
+        # Normalize path distances
+        observation['paths_distance'] = np.clip(observation['paths_distance'][:, 1] / track_length, 0.0, 1.0)
         # Get distance to center of current path
         path_start = observation['paths_start'][0]
         path_end = observation['paths_end'][0]
@@ -326,14 +323,12 @@ class EnhanceObservations2(ActionObservationWrapper):
         proj_h = rel_pos - proj_length * path_dir
         signed_distance = (np.sign(get_xz_angle_between(path_dir, proj_h)) * np.linalg.norm(proj_h)).item()
         observation['center_path_distance'] = signed_distance
-        # # Add current lap
-        # observation['current_lap'] = kart.finished_laps
+        # Add current lap
+        observation['current_lap'] = kart.finished_laps
         # Add game time
-        if observation['phase'] >= Phase.RACE_PHASE.value:
-            self.game_time += ExpertAgent.STEP_SIZE
-        observation['game_time'] = self.game_time
+        observation['game_time'] = self.race_env.world.time
         # Add is on road
-        observation['is_on_road'] = int(abs(signed_distance) <= (observation['paths_width'][0] / 2.0))
+        observation['is_on_road'] = int(kart.is_on_road)
         # Add nitro time left
         if did_nitro:
             # If the kart used nitro, reset the nitro time left
@@ -351,7 +346,7 @@ class EnhanceObservations2(ActionObservationWrapper):
             else:
                 # Update duration and fadeout times
                 nitro_time_left = self.nitro_duration_time_left + self.nitro_fadeout_time_left
-                nitro_time_left = max(0.0, nitro_time_left - ExpertAgent.STEP_SIZE)
+                nitro_time_left = max(0.0, nitro_time_left - self.race_env.config.step_size)
                 if nitro_time_left <= ExpertAgent.NITRO_FADE_OUT_TIME:
                     self.nitro_duration_time_left = 0.0
                     self.nitro_fadeout_time_left = nitro_time_left
@@ -360,52 +355,78 @@ class EnhanceObservations2(ActionObservationWrapper):
                     self.nitro_fadeout_time_left = ExpertAgent.NITRO_FADE_OUT_TIME
                 observation['nitro_duration_time_left'] = self.nitro_duration_time_left
                 observation['nitro_fadeout_time_left'] = self.nitro_fadeout_time_left
-        # # Change kart positions, add opponent karts relative rank and velocity, all sorted by track distance difference
-        # kart_positions = []
-        # karts_rel_rank = []
-        # karts_velocity = []
-        # karts_track_diff = []
-        # karts_attachment = []
-        # for kart_ix, other_kart in enumerate(self.env.unwrapped.world.karts):
-        #     if kart_ix == self.env.unwrapped.kart_ix:
-        #         continue  # Skip self
-        #     # Relative position
-        #     kart_pos = kartview(self.env, other_kart.location)
-        #     kart_positions.append(kart_pos)
-        #     # Relative rank
-        #     other_rank = other_kart.position
-        #     normalized_other_rank = 1.0 - ((other_rank - 1) / (num_karts - 1))  # 0.0 for last, 1.0 for first and others in between
-        #     rel_rank = normalized_other_rank - normalized_rank
-        #     karts_rel_rank.append(rel_rank)
-        #     # Velocity (3D vector)
-        #     velocity = kartview(self.env, other_kart.velocity, make_relative_to_kart=False)
-        #     karts_velocity.append(velocity)
-        #     # Track distance difference
-        #     other_kart_overall_distance = max(0.0, other_kart.overall_distance)
-        #     track_diff = abs(other_kart_overall_distance - overall_distance)
-        #     karts_track_diff.append(track_diff)
-        #     # Attachment
-        #     attachment = other_kart.attachment.type.value
-        #     karts_attachment.append(attachment)
-        # # Convert to numpy arrays
-        # kart_positions = np.array(kart_positions)
-        # karts_rel_rank = np.array(karts_rel_rank)
-        # karts_velocity = np.array(karts_velocity)
-        # karts_track_diff = np.array(karts_track_diff)
-        # karts_attachment = np.array(karts_attachment)
-        # # Sort all by track distance difference
-        # sorted_indices = np.argsort(karts_track_diff)
-        # kart_positions = kart_positions[sorted_indices]
-        # karts_rel_rank = karts_rel_rank[sorted_indices]
-        # karts_velocity = karts_velocity[sorted_indices]
-        # karts_track_diff = karts_track_diff[sorted_indices]
-        # karts_attachment = karts_attachment[sorted_indices]
-        # # Set in observation
-        # observation['karts_position'] = kart_positions[:self.state_karts]
-        # observation['karts_rel_rank'] = karts_rel_rank[:self.state_karts]
-        # observation['karts_velocity'] = karts_velocity[:self.state_karts]
-        # observation['karts_distance'] = karts_track_diff[:self.state_karts]
-        # observation['karts_attachment'] = karts_attachment[:self.state_karts]
+        # Add zipper time left
+        if did_zipper:
+            # If the kart used zipper, reset the zipper time left
+            self.zipper_duration_time_left = ExpertAgent.ZIPPER_DURATION
+            self.zipper_fadeout_time_left = ExpertAgent.ZIPPER_FADE_OUT_TIME
+            observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+            observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
+        else:
+            if reset:
+                # If resetting, set zipper time left to 0.0
+                self.zipper_duration_time_left = 0.0
+                self.zipper_fadeout_time_left = 0.0
+                observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+                observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
+            else:
+                # Decrease zipper time left
+                zipper_time_left = self.zipper_duration_time_left + self.zipper_fadeout_time_left
+                zipper_time_left = max(0.0, zipper_time_left - self.race_env.config.step_size)
+                if zipper_time_left <= ExpertAgent.ZIPPER_FADE_OUT_TIME:
+                    self.zipper_duration_time_left = 0.0
+                    self.zipper_fadeout_time_left = zipper_time_left
+                else:
+                    self.zipper_duration_time_left = zipper_time_left - ExpertAgent.ZIPPER_FADE_OUT_TIME
+                    self.zipper_fadeout_time_left = ExpertAgent.ZIPPER_FADE_OUT_TIME
+                observation['zipper_duration_time_left'] = self.zipper_duration_time_left
+                observation['zipper_fadeout_time_left'] = self.zipper_fadeout_time_left
+        # Change kart positions, add opponent karts relative rank and velocity, all sorted by track distance difference
+        kart_positions = []
+        karts_rel_rank = []
+        karts_velocity = []
+        karts_track_diff = []
+        karts_attachment = []
+        for kart_ix, other_kart in enumerate(self.race_env.world.karts):
+            if kart_ix == my_kart_ix:
+                continue  # Skip self
+            # Relative position
+            kart_pos = kartview(kart, other_kart.location)
+            kart_positions.append(kart_pos)
+            # Relative rank
+            other_rank = other_kart.position
+            normalized_other_rank = 1.0 - ((other_rank - 1) / (num_karts - 1))  # 0.0 for last, 1.0 for first and others in between
+            rel_rank = normalized_other_rank - normalized_rank
+            karts_rel_rank.append(rel_rank)
+            # Velocity (3D vector)
+            velocity = kartview(kart, other_kart.velocity, make_relative_to_kart=False)
+            karts_velocity.append(velocity)
+            # Track distance difference
+            other_kart_overall_distance = max(0.0, other_kart.overall_distance)
+            track_diff = abs(other_kart_overall_distance - overall_distance)
+            karts_track_diff.append(track_diff)
+            # Attachment
+            attachment = other_kart.attachment.type.value
+            karts_attachment.append(attachment)
+        # Convert to numpy arrays
+        kart_positions = np.array(kart_positions)
+        karts_rel_rank = np.array(karts_rel_rank)
+        karts_velocity = np.array(karts_velocity)
+        karts_track_diff = np.array(karts_track_diff)
+        karts_attachment = np.array(karts_attachment)
+        # Sort all by track distance difference
+        sorted_indices = np.argsort(karts_track_diff)
+        kart_positions = kart_positions[sorted_indices]
+        karts_rel_rank = karts_rel_rank[sorted_indices]
+        karts_velocity = karts_velocity[sorted_indices]
+        karts_track_diff = karts_track_diff[sorted_indices]
+        karts_attachment = karts_attachment[sorted_indices]
+        # Set in observation
+        observation['karts_position'] = kart_positions[:self.state_karts]
+        observation['karts_rel_rank'] = karts_rel_rank[:self.state_karts]
+        observation['karts_velocity'] = karts_velocity[:self.state_karts]
+        observation['karts_distance'] = karts_track_diff[:self.state_karts]
+        observation['karts_attachment'] = karts_attachment[:self.state_karts]
         # Add skid direction and time since last fire
         if reset or (action is None):
             self.skid_direction = 0
@@ -423,13 +444,13 @@ class EnhanceObservations2(ActionObservationWrapper):
                     if (not last_action['drift']) and (speed > ExpertAgent.SKID_MIN_SPEED):
                         self.skid_direction = -1 if action['steer'] < 0 else 1
                     if self.skid_direction != 0:
-                        self.time_since_skid_start += ExpertAgent.STEP_SIZE
+                        self.time_since_skid_start += self.race_env.config.step_size
                         self.time_since_skid_start = min(self.time_since_skid_start, 5.0)  # Cap at 5 seconds
             # Firing logic
             if action['fire']:
                 self.time_since_last_fire = 0.0
             else:
-                self.time_since_last_fire += ExpertAgent.STEP_SIZE
+                self.time_since_last_fire += self.race_env.config.step_size
                 self.time_since_last_fire = min(self.time_since_last_fire, ExpertAgent.MAX_TIME_SINCE_LAST_FIRE)
         # Set in observation
         observation['skid_direction'] = self.skid_direction
@@ -465,12 +486,13 @@ class EnhanceObservations2(ActionObservationWrapper):
         """
         if self.reset_:
             self.nb_steps = 0
-            self.game_time = 0.0
-            new_obs = self.get_new_observation(observation, action=None, did_nitro=False, reset=True)
+            self.prev_powerup = Powerup.NOTHING.value
+            new_obs = self.get_new_observation(observation, action=None, did_nitro=False, did_zipper=False, reset=True)
         else:
             did_nitro = self.action_['nitro']
+            did_zipper = (self.prev_powerup == Powerup.ZIPPER.value) and self.action_['fire']
             self.nb_steps += 1
-            new_obs = self.get_new_observation(observation, action=self.action_, did_nitro=did_nitro, reset=False)
+            new_obs = self.get_new_observation(observation, action=self.action_, did_nitro=did_nitro, did_zipper=did_zipper, reset=False)
         # Set reset flag back to True
         self.reset_ = True
         self.action_ = None
@@ -481,7 +503,7 @@ class EnhanceObservations2(ActionObservationWrapper):
 class StuckObservations(ActionObservationWrapper):
     """An observation wrapper that adds a 'stuck' indicator to the observation."""
 
-    def __init__(self, env: Env):
+    def __init__(self, env: Env, eval: bool = False):
         """An observation wrapper that adds a 'stuck' indicator to the observation.
 
         Args:
@@ -505,6 +527,8 @@ class StuckObservations(ActionObservationWrapper):
         )
         # Workaround to detect env reset
         self.reset_ = True
+        # Eval
+        self.race_env = self.env.unwrapped._env.unwrapped if eval else self.env.unwrapped
 
     def action(self, action):
         """Store the action taken for stuck detection.
@@ -548,7 +572,7 @@ class StuckObservations(ActionObservationWrapper):
         # Determine if the kart is being rescued
         path_start = observation['paths_start'][0]
         path_end = observation['paths_end'][0]
-        path_width = observation['paths_width'][0]
+        path_width = observation['paths_width'][0][0]
         dy = path_end[1] - path_start[1]
         dz = path_end[2] - path_start[2]
         dz = max(dz, 0.01) if dz >= 0 else min(dz, -0.01)  # Prevent division by zero
@@ -579,7 +603,7 @@ class StuckObservations(ActionObservationWrapper):
                                 (self.time_since_stuck < 2.0))  # Negation of "Tried to accelerate and succeeded"
         # Update time since stuck
         if self.is_stuck:
-            self.time_since_stuck += ExpertAgent.STEP_SIZE
+            self.time_since_stuck += self.race_env.config.step_size
             self.time_since_stuck = min(self.time_since_stuck, 5.0)  # Cap at 5 seconds
         else:
             self.time_since_stuck = 0.0
@@ -868,7 +892,7 @@ class ExpertObservations(ObservationWrapper):
         """
         path_start = observation['paths_start'][path_id]
         path_end = observation['paths_end'][path_id]
-        path_width = observation['paths_width'][path_id]
+        path_width = observation['paths_width'][path_id][0]
         path_dir = path_end - path_start
         side_vec = np.array([path_dir[2], 0.0, -path_dir[0]])  # to the right
         side_vec /= np.linalg.norm(side_vec)  # normalize
@@ -984,7 +1008,7 @@ class ExpertObservations(ObservationWrapper):
         rel_pos = position - path_start
         proj_length = np.dot(rel_pos, path_dir)
         proj_width = np.linalg.norm(rel_pos - proj_length * path_dir)
-        half_path_width = 0.5 * observation['paths_width'][path_id]
+        half_path_width = 0.5 * observation['paths_width'][path_id][0]
         return (0 <= proj_length) and (proj_length <= path_length) and (proj_width <= half_path_width - 0.5 * ExpertAgent.KART_WIDTH)
 
     def __evaluate_items(self, observation, item_id: int, current_path_id: int, items_to_collect: list[tuple[int, int]], items_to_avoid: list[tuple[int, int]]):
@@ -1044,7 +1068,7 @@ class CustomPolarObservations(ObservationWrapper):
     output: (angle in the ZX plane, angle in the ZY plane, distance)
     """
     #: Keys to transform (batch)
-    KEYS = ["items_position", "karts_position", "paths_start", "paths_end"]
+    KEYS = ["items_position", "karts_position", "paths_start", "paths_end", "karts_velocity"]
     #: Keys to transform (single)
     SIMPLE_KEYS = ["target_position", "obstacle_position", "center_path", "velocity", "obstacle_velocity"]
 

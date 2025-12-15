@@ -40,7 +40,20 @@ class Action(TypedDict):
             look_back=False
         )
 
-    def to_env(action: 'Action'):
+    def from_env(input_action: dict) -> 'Action':
+        """Create an Action from a list representation."""
+        return Action(
+            acceleration=input_action['acceleration'].item(),
+            brake=bool(input_action['brake']),
+            drift=bool(input_action['drift']),
+            fire=bool(input_action['fire']),
+            nitro=bool(input_action['nitro']),
+            rescue=bool(input_action['rescue']),
+            steer=input_action['steer'].item(),
+            look_back=False
+        )
+
+    def to_env(action: 'Action') -> np.ndarray:
         """Convert the action to the environment's expected format."""
         return {
             'acceleration': action['acceleration'],

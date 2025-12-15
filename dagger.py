@@ -7,12 +7,12 @@ import gymnasium as gym
 from gymnasium.wrappers import TimeLimit
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
-from core.expert import ExpertAgent
-from core.nn import ActorMLP, CriticMLP
-from core.state import State
-from core.action import Action
-from core.trajectory import TrajectoryDataset
+from stk_actor.core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
+from stk_actor.core.expert import ExpertAgent
+from stk_actor.core.nn import ActorMLP, CriticMLP
+from stk_actor.core.state import State
+from stk_actor.core.action import Action
+from stk_actor.core.trajectory import TrajectoryDataset
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -178,7 +178,7 @@ class DAgger:
         for wrapper in wrappers:
             env = wrapper(env)
         # Initialize the expert agent
-        expert_agent = ExpertAgent(env, enable_drift=self.enable_drift)
+        expert_agent = ExpertAgent(difficulty=2, enable_drift=self.enable_drift)
         # Check device
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")

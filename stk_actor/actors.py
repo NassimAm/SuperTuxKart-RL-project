@@ -20,9 +20,9 @@ class MyWrapper(gym.ActionWrapper):
 class Actor(Agent):
     """Computes probabilities over action"""
 
-    def __init__(self, name, observation_space, action_space):
-        super().__init__(name)
-        self.expert = ExpertAgent(avoid_karts=False)
+    def __init__(self, observation_space, action_space):
+        super().__init__()
+        self.expert = ExpertAgent()
         self.model = ActorMLP(input_dim=179, hidden_dim=512)
 
     def load_state_dict(self, state: dict):

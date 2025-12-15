@@ -5,10 +5,10 @@ import gymnasium as gym
 from gymnasium.wrappers import TimeLimit
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from core.state import State
-from core.action import Action
-from core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
-from core.expert import ExpertAgent
+from stk_actor.core.state import State
+from stk_actor.core.action import Action
+from stk_actor.core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
+from stk_actor.core.expert import ExpertAgent
 from tqdm import tqdm
 import numpy as np
 import argparse
@@ -23,7 +23,7 @@ def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_it
     wrappers = [
         lambda env: TimeLimit(env, max_episode_steps=2500),
         lambda env: ConstantSizedObservations(env, state_paths=10),
-        lambda env: EnhanceObservations(env),
+        lambda env: EnhanceObservations(env, previous_action_horizon=previous_action_horizon),
         lambda env: StuckObservations(env),
         lambda env: ExpertObservations(env),
         lambda env: CustomPolarObservations(env)
@@ -31,7 +31,7 @@ def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_it
     for wrapper in wrappers:
         env = wrapper(env)
 
-    expert = ExpertAgent(env, enable_drift=enable_drift, avoid_bad_items=avoid_bad_items,
+    expert = ExpertAgent(difficulty=difficulty, enable_drift=enable_drift, avoid_bad_items=avoid_bad_items,
                          avoid_karts=avoid_karts, use_nitro=use_nitro, use_items=use_items)
 
     state, _ = env.reset()
@@ -64,7 +64,7 @@ def collect_trajectories(data_path: str, enable_drift: bool = True, avoid_bad_it
 
         # Save locally every 10000 steps
         if i % 100000 == 0 and i > 0:
-            state_array = np.concat([State.to_model(State.from_env(s), previous_action_horizon=previous_action_horizon).numpy().reshape(1, -1) for s in states])
+            state_array = np.concat([State.to_model(State.from_env(s)).numpy().reshape(1, -1) for s in states])
             actions_array = np.concat([Action.to_model(Action.from_env(a)).numpy().reshape(1, -1) for a in actions])
             rewards_array = np.array(rewards)
             terminateds_array = np.array(terminateds)

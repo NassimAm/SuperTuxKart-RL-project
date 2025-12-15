@@ -177,8 +177,8 @@ class ExpertAgent:
         if self.use_nitro:
             self.__handle_nitro(state, action, max_turn_speed)
         # Handle zipper
-        # if self.use_items:
-        #     self.__handle_zipper(state, action, track_direction, last_path_id)
+        if self.use_items:
+            self.__handle_zipper(state, action, track_direction, last_path_id)
         # Otherwise, set acceleration to max
         action['acceleration'] = 1.0
 
@@ -236,8 +236,8 @@ class ExpertAgent:
         # If the AI has a lot of nitro, it should consume it without waiting for some fadeout
         big_reserve = False
         # If this kart is the last kart, set nitro reserve to be at most 2
-        # if state['rank'] == 0.0:
-        #     energy_reserve = 2
+        if state['rank'] == 0.0:
+            energy_reserve = 2
         # Estimate time towards the end of the race.
         # Decreases the reserve size when there is an estimate of time remaining
         # to the end of less than 2,5 times the maximum nitro effect duration.
@@ -263,9 +263,9 @@ class ExpertAgent:
         # If trying to pass a bomb to a kart faster or far ahead, use nitro reserve
         speed = state['velocity'][2]
         if (state['attachment'] == Attachment.BOMB) and (energy_reserve > 0):
-            karts_position = state['karts_position']
-            kart_ahead_id = next((i for i in range(len(karts_position)) if abs(karts_position[i][0]) < (np.pi / 2.0)), None)
-            if (kart_ahead_id is not None) and (state['karts_position'][kart_ahead_id][2] > 10.0):
+            karts_rel_rank = state['karts_rel_rank']
+            kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
+            if (kart_ahead_id is not None) and ((state['karts_distance'][kart_ahead_id] > 10.0) or (state['karts_velocity'][kart_ahead_id][2] > speed)):
                 energy_reserve = 0
         # Don't use nitro if building an energy reserve
         if state['energy'] <= energy_reserve:
@@ -481,36 +481,38 @@ class ExpertAgent:
             items_to_avoid (list[tuple[int, int]]): List to store item IDs to avoid and their associated path IDs.
         """
         # If we don't have a powerup, nothing to do
-        if state['powerup'] == 0:
+        if state['powerup'] == Powerup.NOTHING:
             return
-        # # Get kart ahead ID
-        # karts_position = state['karts_position']
-        # kart_ahead_id = next((i for i in range(len(karts_position)) if abs(karts_position[i][0]) < (np.pi / 2.0)), None)
-        # # Treat each powerup type accordingly
-        # if state['powerup'] == Powerup.BUBBLEGUM:
-        #     self.__handle_bubblegum(state, action, items_to_collect, items_to_avoid)
-        # elif state['powerup'] == Powerup.CAKE:
-        #     self.__handle_cake(state, action)
-        # elif state['powerup'] == Powerup.BOWLING:
-        #     self.__handle_bowling(state, action)
-        # elif state['powerup'] == Powerup.PLUNGER:
-        #     kart_ahead_distance = state['karts_position'][kart_ahead_id][2] if kart_ahead_id is not None else float('inf')
-        #     if kart_ahead_distance < 30.0:
-        #         action['fire'] = True
-        # elif state['powerup'] == Powerup.SWITCH:
-        #     self.__handle_switch(state, action, items_to_avoid)
-        # elif state['powerup'] == Powerup.PARACHUTE:
-        #     # Wait until a previous parachute effect is gone
-        #     if state['time_since_last_fire'] > ExpertAgent.PARACHUTE_DURATION_OTHER:
-        #         action['fire'] = True
-        # elif state['powerup'] == Powerup.SWATTER:
-        #     # if the kart has a shield, do not break it by using a swatter
-        #     if state['attachment'] != Attachment.BUBBLEGUM_SHIELD:
-        #         self.__handle_swatter(state, action, items_to_collect)
-        # elif state['powerup'] == Powerup.RUBBERBALL:
-        #     action['fire'] = True
-        if state['time_since_last_fire'] > 1.5:
-            action['fire'] = True  # NOTE: powerup observation is not refering to powerup but to number of powerups, so always fire if we have any
+        # Get kart ahead ID
+        karts_rel_rank = state['karts_rel_rank']
+        kart_ahead_id = next((i for i in range(len(karts_rel_rank)) if karts_rel_rank[i] > 0), None)
+        # Treat each powerup type accordingly
+        if state['powerup'] == Powerup.BUBBLEGUM:
+            self.__handle_bubblegum(state, action, items_to_collect, items_to_avoid)
+        elif state['powerup'] == Powerup.CAKE:
+            self.__handle_cake(state, action)
+        elif state['powerup'] == Powerup.BOWLING:
+            self.__handle_bowling(state, action)
+        elif state['powerup'] == Powerup.PLUNGER:
+            kart_ahead_distance = state['karts_distance'][kart_ahead_id] if kart_ahead_id is not None else float('inf')
+            if kart_ahead_distance < 30.0:
+                action['fire'] = True
+        elif state['powerup'] == Powerup.SWITCH:
+            self.__handle_switch(state, action, items_to_avoid)
+        elif state['powerup'] == Powerup.PARACHUTE:
+            # Wait until a previous parachute effect is gone
+            if state['time_since_last_fire'] > ExpertAgent.PARACHUTE_DURATION_OTHER:
+                action['fire'] = True
+        elif state['powerup'] == Powerup.SWATTER:
+            # if the kart has a shield, do not break it by using a swatter
+            if state['attachment'] != Attachment.BUBBLEGUM_SHIELD:
+                self.__handle_swatter(state, action, items_to_collect)
+        elif state['powerup'] == Powerup.RUBBERBALL:
+            # Perhaps some more sophisticated algorithm might be useful.
+            # For now: fire if there is a kart ahead (which means that
+            # this kart is certainly not the first kart)
+            if state['rank'] != 1.0:
+                action['fire'] = True
 
     def __handle_bubblegum(self, state: State, action: Action, items_to_collect: list[tuple[int, int]],
                            items_to_avoid: list[tuple[int, int]]):
@@ -751,7 +753,7 @@ class ExpertAgent:
         # as we may want to hit them on purpose to pass the bomb to them
         if self.avoid_karts and (state['attachment'] != Attachment.BOMB):
             for i, kart_pos in enumerate(state['karts_position']):
-                if state['karts_position'][i][2] < 0:
+                if state['karts_rel_rank'][i] < 0:
                     continue  # Only consider karts ahead
                 kart_speed = state['karts_velocity'][i][2]
                 relative_speed = speed - kart_speed
@@ -1042,9 +1044,9 @@ class ExpertAgent:
     def __estimate_finish_time(self, state: State):
         """Estimates the time remaining to finish the race based on the current state."""
         # Get full distance of the race
-        full_distance = state['track_length']
+        full_distance = state['full_track_distance']
         # Get full distance covered by the kart
-        kart_overall_distance = state['distance_down_track']
+        kart_overall_distance = state['overall_distance_ratio'] * full_distance
         # Get average speed of the kart over all the race so far
         average_speed = 1.0 if state['game_time'] == 0 else (kart_overall_distance / state['game_time'])
         # Calculate estimated finish time

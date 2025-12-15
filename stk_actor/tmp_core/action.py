@@ -27,19 +27,6 @@ class Action(TypedDict):
     CONTINUOUS_ACTIONS = ['acceleration', 'steer']
     DISCRETE_ACTIOSNS = ['brake', 'drift', 'fire', 'nitro', 'rescue']
 
-    def from_env(input_action: dict) -> 'Action':
-        """Create an Action from a list representation."""
-        return Action(
-            acceleration=input_action['acceleration'].item(),
-            brake=bool(input_action['brake']),
-            drift=bool(input_action['drift']),
-            fire=bool(input_action['fire']),
-            nitro=bool(input_action['nitro']),
-            rescue=bool(input_action['rescue']),
-            steer=input_action['steer'].item(),
-            look_back=False
-        )
-
     def empty() -> 'Action':
         """Create an empty Action with all components set to their default values."""
         return Action(
@@ -53,17 +40,42 @@ class Action(TypedDict):
             look_back=False
         )
 
-    def to_env(action: 'Action') -> np.ndarray:
+    def to_env(action: 'Action'):
         """Convert the action to the environment's expected format."""
         return {
-            'acceleration': np.array(action['acceleration']),
+            'acceleration': action['acceleration'],
             'brake': int(action['brake']),
             'drift': int(action['drift']),
             'fire': int(action['fire']),
             'nitro': int(action['nitro']),
             'rescue': int(action['rescue']),
-            'steer': np.array(action['steer'])
+            'steer': action['steer']
         }
+
+    def from_array(input_array: np.ndarray) -> 'Action':
+        """Create an Action from a list representation."""
+        return Action(
+            acceleration=input_array[0].item(),
+            brake=bool(input_array[1].item()),
+            drift=bool(input_array[2].item()),
+            fire=bool(input_array[3].item()),
+            nitro=bool(input_array[4].item()),
+            rescue=bool(input_array[5].item()),
+            steer=input_array[6].item(),
+            look_back=False
+        )
+
+    def to_array(action: 'Action') -> np.ndarray:
+        """Convert the action to a list representation."""
+        return np.array([
+            action['acceleration'],
+            int(action['brake']),
+            int(action['drift']),
+            int(action['fire']),
+            int(action['nitro']),
+            int(action['rescue']),
+            action['steer']
+        ], dtype=np.float32)
 
     def from_model(model_output: torch.Tensor) -> 'Action':
         """Create an Action from the model's output tensor."""

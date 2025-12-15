@@ -1,7 +1,7 @@
 import gymnasium as gym
 from pystk2_gymnasium import AgentSpec
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from stk_actor.core.wrappers import EnhanceObservations1, EnhanceObservations2, CustomPolarObservations, StuckObservations, ExpertObservations
+from stk_actor.core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
 from stk_actor.core.state import State
 from stk_actor.core.actor import Actor
 from tqdm import tqdm
@@ -21,11 +21,10 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
     # Load the environment
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     wrappers = [
-        lambda env: EnhanceObservations1(env),
         lambda env: ConstantSizedObservations(env, state_paths=10),
-        lambda env: EnhanceObservations2(env, previous_action_horizon=1),
+        lambda env: EnhanceObservations(env, previous_action_horizon=1),
         lambda env: StuckObservations(env),
-        lambda env: ExpertObservations(env, avoid_karts=False),
+        lambda env: ExpertObservations(env),
         lambda env: CustomPolarObservations(env)
     ]
     for wrapper in wrappers:

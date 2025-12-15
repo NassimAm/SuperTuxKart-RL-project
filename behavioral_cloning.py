@@ -1,7 +1,7 @@
 import os
-from core.trajectory import TrajectoryDataset
-from core.nn import ActorMLP, ActorResMLP
-from core.action import Action
+from stk_actor.core.trajectory import TrajectoryDataset
+from stk_actor.core.nn import ActorMLP, ActorResMLP
+from stk_actor.core.action import Action
 import numpy as np
 from torch.utils.data import DataLoader
 from typing import Optional
