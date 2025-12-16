@@ -237,7 +237,7 @@ class PPOTrainer:
 
     def _env_obs_to_tensor(self, obs):
         # Your project-specific conversion
-        s = State.to_model(State.from_env(obs, all_features=self.all_features))
+        s = State.to_model(State.from_env(obs), all_features=self.all_features)
         return s.to(self.device)
 
     def _actions_list_to_env(self, actions_list):
