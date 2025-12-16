@@ -7,6 +7,11 @@ from torch.distributions import Normal, Bernoulli
 EPS = 1e-6
 
 
+def atanh(x: torch.Tensor) -> torch.Tensor:
+    x = x.clamp(-1 + EPS, 1 - EPS)
+    return 0.5 * (torch.log1p(x) - torch.log1p(-x))
+
+
 def logit(x: torch.Tensor) -> torch.Tensor:
     x = x.clamp(EPS, 1 - EPS)
     return torch.log(x) - torch.log(1 - x)
@@ -47,13 +52,13 @@ class StochasticActorMLP(nn.Module):
         super(StochasticActorMLP, self).__init__()
         self.deterministic_actor = ActorMLP(input_dim, hidden_dim) if pretrained_mlp is None else pretrained_mlp
         # Add std neurons for continuous actions
-        self.acceleration_std_layer = nn.Linear(hidden_dim, 1)
-        self.steer_std_layer = nn.Linear(hidden_dim, 1)
+        self.acceleration_log_std_layer = nn.Linear(hidden_dim, 1)
+        self.steer_log_std_layer = nn.Linear(hidden_dim, 1)
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.deterministic_actor(state)
 
-    def sample(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def sample(self, state: torch.Tensor, deterministic: bool = False, actions: Optional[list[torch.Tensor]] = None) -> torch.Tensor:
         """
         PPO-ready sampler.
 
@@ -65,45 +70,48 @@ class StochasticActorMLP(nn.Module):
         """
         features = self.deterministic_actor.backbone(state)
 
-        actions = []
+        action = []
         logp_sum = torch.zeros(state.shape[0], device=state.device)
         ent_sum = torch.zeros(state.shape[0], device=state.device)
 
-        means_out = []
-        stds_out = []
-
-        for (action_name, out_type), head in zip(
+        for i, ((action_name, out_type), head) in enumerate(zip(
             self.deterministic_actor.output_types,
             self.deterministic_actor.action_heads,
-        ):
-            mean_bounded = head(features).squeeze(-1)   # [B] in [-1,1] or [0,1] or prob for discrete
-            means_out.append(mean_bounded)
+        )):
+            x = features
+            for j, head_layer in enumerate(head):
+                x = head_layer(x)
+                if j == len(head) - 3:  # Before last layer
+                    std_features = x
+            mean_bounded = x.squeeze(-1)   # [B] in [-1,1] or [0,1] or prob for discrete
 
             # --- Continuous actions ---
             if (action_name == 'steer') and (out_type == "continuous-tanh"):
                 # mean in [-1,1] -> mean in R
-                mu = torch.atanh(mean_bounded)
+                mu = atanh(mean_bounded)
 
-                log_std = self.steer_std_layer(features).squeeze(-1)
+                log_std = self.steer_log_std_layer(std_features).squeeze(-1)
                 log_std = log_std.clamp(-5.0, 2.0)
                 std = torch.exp(log_std)
-                stds_out.append(std)
 
                 dist = Normal(mu, std)
 
-                if deterministic:
-                    raw = mu
+                if actions is not None:
+                    a = actions[i]
+                    raw = atanh(a)
                 else:
-                    raw = dist.rsample()
-
-                a = torch.tanh(raw)
+                    if deterministic:
+                        raw = mu
+                    else:
+                        raw = dist.rsample()
+                    a = torch.tanh(raw)
 
                 # squash correction (tanh)
                 logp = dist.log_prob(raw) - torch.log(1 - a.pow(2) + EPS)
                 # entropy (approx: base gaussian entropy; common in practice)
                 ent = dist.entropy()
 
-                actions.append(a)
+                action.append(a)
                 logp_sum += logp
                 ent_sum += ent
 
@@ -111,25 +119,27 @@ class StochasticActorMLP(nn.Module):
                 # mean in [0,1] -> mean in R
                 mu = logit(mean_bounded)
 
-                log_std = self.acceleration_std_layer(features).squeeze(-1)
+                log_std = self.acceleration_log_std_layer(std_features).squeeze(-1)
                 log_std = log_std.clamp(-5.0, 2.0)
                 std = torch.exp(log_std)
-                stds_out.append(std)
 
                 dist = Normal(mu, std)
 
-                if deterministic:
-                    raw = mu
+                if actions is not None:
+                    a = actions[i]
+                    raw = logit(a)
                 else:
-                    raw = dist.rsample()
-
-                a = torch.sigmoid(raw)
+                    if deterministic:
+                        raw = mu
+                    else:
+                        raw = dist.rsample()
+                    a = torch.sigmoid(raw)
 
                 # squash correction (sigmoid): derivative = a*(1-a)
                 logp = dist.log_prob(raw) - torch.log(a * (1 - a) + EPS)
                 ent = dist.entropy()
 
-                actions.append(a)
+                action.append(a)
                 logp_sum += logp
                 ent_sum += ent
 
@@ -138,27 +148,25 @@ class StochasticActorMLP(nn.Module):
                 p = mean_bounded.clamp(EPS, 1 - EPS)
                 dist = Bernoulli(probs=p)
 
-                if deterministic:
-                    a = (p >= 0.5).float()
+                if actions is not None:
+                    a = (actions[i] >= 0.5).float()
                 else:
-                    a = dist.sample()
+                    if deterministic:
+                        a = (p >= 0.5).float()
+                    else:
+                        a = dist.sample()
 
                 logp = dist.log_prob(a)
                 ent = dist.entropy()
 
-                actions.append(a)
+                action.append(a)
                 logp_sum += logp
                 ent_sum += ent
-                stds_out.append(torch.zeros_like(p))
 
             else:
                 raise ValueError(f"Unknown out_type={out_type} for action={action_name}")
 
-        info = {
-            "means": means_out,
-            "stds": stds_out,
-        }
-        return actions, logp_sum, ent_sum, info
+        return action, logp_sum, ent_sum
 
 
 class ActorResMLP(nn.Module):
