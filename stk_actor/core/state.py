@@ -402,7 +402,7 @@ class State(TypedDict):
             'prev_actions': [Action.to_array(a) for a in state['prev_actions']]
         }
 
-    def to_model(state: 'State', all_features: bool = False) -> torch.Tensor:
+    def to_model(state: 'State', state_karts: int = 5, all_features: bool = False) -> torch.Tensor:
         """Convert the state to the model's expected format."""
         if not all_features:
             # Items can be very far so we clip distances to a max value
@@ -413,7 +413,19 @@ class State(TypedDict):
             max_kart_distance = 50.0
             karts_position = state['karts_position'].copy()
             karts_position[:, 2] = np.clip(karts_position[:, 2], 0.0, max_kart_distance)
+            karts_rel_rank = state['karts_rel_rank']
+            karts_velocity = state['karts_velocity']
             karts_distance = np.clip(state['karts_distance'], 0.0, max_kart_distance)
+            karts_attachment = state['karts_attachment']
+            # Add zero padding or truncate to have fixed number of karts
+            if karts_position.shape[0] < state_karts:
+                position_padding = np.zeros((state_karts - karts_position.shape[0], 3), dtype=karts_position.dtype)
+                karts_position = np.vstack([karts_position, position_padding])
+                karts_rel_rank = np.hstack([karts_rel_rank, np.zeros(state_karts - karts_rel_rank.shape[0], dtype=karts_rel_rank.dtype)])
+                velocity_padding = np.zeros((state_karts - karts_velocity.shape[0], 3), dtype=karts_velocity.dtype)
+                karts_velocity = np.vstack([karts_velocity, velocity_padding])
+                karts_distance = np.hstack([karts_distance, np.zeros(state_karts - karts_distance.shape[0], dtype=karts_distance.dtype)])
+                karts_attachment += [Attachment.NOTHING] * (state_karts - len(karts_attachment))
             return torch.concat([
                 # Race stats
                 torch.tensor([state['rank']], dtype=torch.float32),
@@ -460,14 +472,15 @@ class State(TypedDict):
                 torch.tensor(np.concatenate([e.encode() for e in state['items_type']]), dtype=torch.float32),
                 # Other karts
                 torch.tensor(karts_position.reshape(-1), dtype=torch.float32),
-                torch.tensor(state['karts_rel_rank'].reshape(-1), dtype=torch.float32),
-                torch.tensor(state['karts_velocity'].reshape(-1), dtype=torch.float32),
+                torch.tensor(karts_rel_rank.reshape(-1), dtype=torch.float32),
+                torch.tensor(karts_velocity.reshape(-1), dtype=torch.float32),
                 torch.tensor(karts_distance.reshape(-1), dtype=torch.float32),
-                torch.tensor(np.concatenate([e.encode() for e in state['karts_attachment']]), dtype=torch.float32),
+                torch.tensor(np.concatenate([e.encode() for e in karts_attachment]), dtype=torch.float32),
                 # Previous actions
                 torch.cat([Action.to_model(a) for a in state['prev_actions']])
             ])
         else:
+            # TODO: add padding for missing karts
             # Use all features
             return torch.concat([
                 torch.tensor([state['rank']], dtype=torch.float32),
