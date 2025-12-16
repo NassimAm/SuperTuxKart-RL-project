@@ -130,6 +130,7 @@ class PPOTrainer:
         lr: float = 1e-3,
         n_epochs: int = 4,
         batch_size: int = 256,
+        all_features: bool = False,
         logging: bool = False,
         experiment_name: Optional[str] = None,
         tags: list[str] = [],
@@ -189,9 +190,11 @@ class PPOTrainer:
         # Check device
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
+        # Set all features flag
+        self.all_features = all_features
         # Get observation and action dimensions
         state, _ = self.env.reset()
-        self.obs_dim = State.to_model(State.from_env(state)).shape[0]
+        self.obs_dim = State.to_model(State.from_env(state), all_features=self.all_features).shape[0]
         self.n_actions = len(Action.get_types())
         # Initialize models
         # Policy model
@@ -234,7 +237,7 @@ class PPOTrainer:
 
     def _env_obs_to_tensor(self, obs):
         # Your project-specific conversion
-        s = State.to_model(State.from_env(obs))
+        s = State.to_model(State.from_env(obs, all_features=self.all_features))
         return s.to(self.device)
 
     def _actions_list_to_env(self, actions_list):
@@ -276,6 +279,8 @@ class PPOTrainer:
 
             if terminated or truncated:
                 next_obs, _ = self.env.reset()
+                if self.logging:
+                    self.neptune_run['train/reward'].log(reward)
 
             state = self._env_obs_to_tensor(next_obs)
 
@@ -340,7 +345,7 @@ class PPOTrainer:
               model_save_interval: int = 10, policy_save_path: str = "ppo_policy.pth",
               stochastic_policy_save_path: str = "ppo_stochastic_policy.pth", critic_save_path: str = "ppo_critic.pth"):
         n_updates = total_timesteps // self.n_steps
-        tqdm_bar = tqdm(range(1, n_updates + 1), desc=f"Iteration 0/{n_updates} | Avg Reward: None")
+        tqdm_bar = tqdm(range(1, n_updates + 1), desc=f"Iteration 0/{n_updates}:")
         for update in tqdm_bar:
             # PPO iteration
             self.collect_rollouts()
@@ -348,12 +353,9 @@ class PPOTrainer:
             # Logging stats
             if update % log_interval == 0:
                 # simple logging
-                with torch.no_grad():
-                    avg_reward = torch.stack(self.buffer.rewards).mean().item()
-                    avg_return = self.buffer.returns.mean().item()
-                    avg_adv = self.buffer.advantages.mean().item()
+                avg_return = self.buffer.returns.mean().item()
+                avg_adv = self.buffer.advantages.mean().item()
                 if self.logging:
-                    self.neptune_run["train/avg_reward"].log(avg_reward)
                     self.neptune_run["train/avg_return"].log(avg_return)
                     self.neptune_run["train/avg_advantage"].log(avg_adv)
             # Model saving
@@ -368,7 +370,7 @@ class PPOTrainer:
                     self.neptune_run["models/critic"].upload(critic_save_path)
                     self.neptune_run["models/stochastic_policy"].upload(stochastic_policy_save_path)
             # Update tqdm description
-            tqdm_bar.set_description(f"Iteration {update}/{n_updates} | Avg Reward: {avg_reward:.3f}")
+            tqdm_bar.set_description(f"Iteration {update}/{n_updates}:")
         # Save final models
         torch.save(self.actor.deterministic_actor.state_dict(), policy_save_path)
         torch.save(self.critic.state_dict(), critic_save_path)
@@ -395,6 +397,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
     parser.add_argument("--n-epochs", type=int, default=4, help="Number of epochs per update.")
     parser.add_argument("--batch-size", type=int, default=256, help="Minibatch size.")
+    parser.add_argument("--all-features", action="store_true", help="Use all features in state representation.")
     parser.add_argument("--logging", "-l", action="store_true", help="Enable Neptune logging.")
     parser.add_argument("--experiment-name", type=str, default=None, help="Neptune experiment name.")
     parser.add_argument("--tags", type=str, nargs='*', default=[], help="Neptune tags.")
@@ -421,6 +424,7 @@ if __name__ == "__main__":
         lr=args.lr,
         n_epochs=args.n_epochs,
         batch_size=args.batch_size,
+        all_features=args.all_features,
         logging=args.logging,
         experiment_name=args.experiment_name,
         tags=args.tags
