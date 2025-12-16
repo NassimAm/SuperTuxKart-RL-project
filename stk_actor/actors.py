@@ -32,6 +32,8 @@ class Actor(Agent):
         obs = {key: self.get((f'env/env_obs/{key}', t))[0].numpy() for key in State.KEYS}
         state_obj = State.from_env(obs)
         state_tensor = State.to_model(state_obj).unsqueeze(0)  # Add batch dimension
+        if state_tensor.shape[1] != 179:
+            raise ValueError(f"Expected state tensor with 179 features, got shape={state_tensor.shape} and state={state_tensor}")
         with torch.no_grad():
             pred_action = torch.cat(self.model(state_tensor))
             action = Action.to_env(Action.from_model(pred_action))
