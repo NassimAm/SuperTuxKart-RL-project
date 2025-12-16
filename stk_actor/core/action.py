@@ -43,13 +43,13 @@ class Action(TypedDict):
     def from_env(input_action: dict) -> 'Action':
         """Create an Action from a list representation."""
         return Action(
-            acceleration=input_action['acceleration'].item(),
-            brake=bool(input_action['brake']),
-            drift=bool(input_action['drift']),
-            fire=bool(input_action['fire']),
-            nitro=bool(input_action['nitro']),
-            rescue=bool(input_action['rescue']),
-            steer=input_action['steer'].item(),
+            acceleration=input_action['acceleration'].item() if isinstance(input_action['acceleration'], np.ndarray) else input_action['acceleration'],
+            brake=bool(input_action['brake'].item()) if isinstance(input_action['brake'], np.ndarray) else bool(input_action['brake']),
+            drift=bool(input_action['drift'].item()) if isinstance(input_action['drift'], np.ndarray) else bool(input_action['drift']),
+            fire=bool(input_action['fire'].item()) if isinstance(input_action['fire'], np.ndarray) else bool(input_action['fire']),
+            nitro=bool(input_action['nitro'].item()) if isinstance(input_action['nitro'], np.ndarray) else bool(input_action['nitro']),
+            rescue=bool(input_action['rescue'].item()) if isinstance(input_action['rescue'], np.ndarray) else bool(input_action['rescue']),
+            steer=input_action['steer'].item() if isinstance(input_action['steer'], np.ndarray) else input_action['steer'],
             look_back=False
         )
 
