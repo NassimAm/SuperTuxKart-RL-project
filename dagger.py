@@ -162,9 +162,9 @@ class DAgger:
             }
             neptune_run["parameters"] = params
             # Upload a copy of the state representation source code
-            neptune_run['src/state.py'].upload('core/state.py')
+            neptune_run['src/state.py'].upload('stk_actor/core/state.py')
             # Upload a copy of the action representation source code
-            neptune_run['src/action.py'].upload('core/action.py')
+            neptune_run['src/action.py'].upload('stk_actor/core/action.py')
         # Initialize the environment with necessary wrappers
         env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=2, num_kart=10)
         wrappers = [

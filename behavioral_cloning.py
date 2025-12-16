@@ -72,9 +72,9 @@ def train(data_path: str, model_path: str, drift_residual: bool = False, experim
         }
         neptune_run["parameters"] = params
         # Upload a copy of the state representation source code
-        neptune_run['src/state.py'].upload('core/state.py')
+        neptune_run['src/state.py'].upload('stk_actor/core/state.py')
         # Upload a copy of the action representation source code
-        neptune_run['src/action.py'].upload('core/action.py')
+        neptune_run['src/action.py'].upload('stk_actor/core/action.py')
 
     # Check device
     device = "cuda" if torch.cuda.is_available() else "cpu"
