@@ -51,7 +51,7 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
         env.unwrapped.default_track = track
         state, info = env.reset()
         positions_data['track'].append(track)
-        rewards = []
+        reward = 0.0
         done = False
         nb_steps = 0
         # Run the episode
@@ -65,13 +65,11 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
             )
 
             state = next_state
-            rewards.append(reward)
             nb_steps += 1
             done = terminated or truncated
         # Record the final position
         positions_data['position'].append(info['position'])
-        positions_data['reward_mean'].append(np.mean(rewards).item())
-        positions_data['reward_std'].append(np.std(rewards).item())
+        positions_data['reward'].append(reward)
         tqdm_bar.set_description(f"Trial {trial+1}/{nb_trials} - Position Avg: {np.mean(positions_data['position']).item():.2f}, Position Std: {np.std(positions_data['position']).item():.2f}")
     # Close the environment
     env.close()

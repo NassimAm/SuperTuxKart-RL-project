@@ -109,7 +109,8 @@ class StochasticActorMLP(nn.Module):
                     a = torch.tanh(raw)
 
                 # squash correction (tanh)
-                logp = dist.log_prob(raw) - torch.log(1 - a.pow(2) + EPS)
+                # logp = dist.log_prob(raw) - torch.log(1 - a.pow(2) + EPS)
+                logp = dist.log_prob(raw)
                 # entropy (approx: base gaussian entropy; common in practice)
                 ent = dist.entropy()
 
@@ -138,7 +139,8 @@ class StochasticActorMLP(nn.Module):
                     a = torch.sigmoid(raw)
 
                 # squash correction (sigmoid): derivative = a*(1-a)
-                logp = dist.log_prob(raw) - torch.log(a * (1 - a) + EPS)
+                # logp = dist.log_prob(raw) - torch.log(a * (1 - a) + EPS)
+                logp = dist.log_prob(raw)
                 ent = dist.entropy()
 
                 action.append(a)
@@ -147,7 +149,7 @@ class StochasticActorMLP(nn.Module):
 
             # --- Discrete actions (assumed Bernoulli) ---
             elif out_type == "discrete":
-                p = mean_bounded.clamp(EPS, 1 - EPS)
+                p = mean_bounded
                 dist = Bernoulli(probs=p)
 
                 if actions is not None:
