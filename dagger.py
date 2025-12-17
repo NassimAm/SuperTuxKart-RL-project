@@ -217,7 +217,8 @@ class DAgger:
                     # Get the expert action
                     expert_action = expert_agent.act(state)
                     # Convert state to tensor
-                    state_tensor = State.to_model(State.from_env(state))
+                    state_obj: State = State.from_env(state)
+                    state_tensor = State.to_model(state_obj)
                     # Convert expert action to tensor
                     expert_action_tensor = Action.to_model(Action.from_env(expert_action))
                     # Get the expert action with probability eps
@@ -234,30 +235,32 @@ class DAgger:
                     state, reward, terminated, truncated, _ = env.step(action_to_play)
                     done = terminated or truncated
                     # Store episode data
-                    episode_states.append(state_tensor)
-                    episode_actions.append(expert_action_tensor)
-                    episode_rewards.append(reward)
-                    episode_terminated.append(float(terminated))
+                    if state_obj['time_since_stuck'] < 3.0:  # Avoid filling buffer with a lot of stuck states
+                        episode_states.append(state_tensor)
+                        episode_actions.append(expert_action_tensor)
+                        episode_rewards.append(reward)
+                        episode_terminated.append(float(terminated))
                 # If we are training a critic, compute episode return (GAE)
-                if with_critic:
-                    episode_states.append(State.to_model(State.from_env(state)))  # Add final state
-                    states_tensor = torch.stack(episode_states)                                # [T + 1, obs_dim]
-                    rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)        # [T]
-                    terminated_tensor = torch.tensor(episode_terminated, dtype=torch.float32)  # [T]
-                    advantages, returns, _ = self.compute_gae(
-                        critic_model,
-                        states_tensor,
-                        rewards_tensor,
-                        terminated_tensor,
-                        gamma=gamma,
-                        gae_lambda=gae_lambda,
-                        device=device
-                    )
-                    # Store the state-expert_action-return triplet in the replay buffer
-                    replay_buffer.bulk_add(episode_states[:-1], episode_actions, returns)
-                else:
-                    # Store the state-expert_action pair in the replay buffer
-                    replay_buffer.bulk_add(episode_states, episode_actions)
+                if len(episode_states) > 0:
+                    if with_critic:
+                        episode_states.append(State.to_model(State.from_env(state)))  # Add final state
+                        states_tensor = torch.stack(episode_states)                                # [T + 1, obs_dim]
+                        rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)        # [T]
+                        terminated_tensor = torch.tensor(episode_terminated, dtype=torch.float32)  # [T]
+                        advantages, returns, _ = self.compute_gae(
+                            critic_model,
+                            states_tensor,
+                            rewards_tensor,
+                            terminated_tensor,
+                            gamma=gamma,
+                            gae_lambda=gae_lambda,
+                            device=device
+                        )
+                        # Store the state-expert_action-return triplet in the replay buffer
+                        replay_buffer.bulk_add(episode_states[:-1], episode_actions, returns)
+                    else:
+                        # Store the state-expert_action pair in the replay buffer
+                        replay_buffer.bulk_add(episode_states, episode_actions)
             # Decay epsilon
             eps *= eps_rate
             # Prepare the dataset from the replay buffer
