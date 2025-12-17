@@ -222,6 +222,8 @@ class State(TypedDict):
     """Current lap number."""
     game_time: float
     """Current game time."""
+    time_since_off_road: float
+    """Time since the kart went off the road."""
     track_direction: DirectionType
     """Current direction of the track."""
     speed_radius_ratio: float
@@ -273,6 +275,7 @@ class State(TypedDict):
         'velocity',
         'current_lap',
         'game_time',
+        'time_since_off_road',
         'nitro_duration_time_left',
         'nitro_fadeout_time_left',
         'zipper_duration_time_left',
@@ -329,6 +332,7 @@ class State(TypedDict):
             velocity=state['velocity'],
             current_lap=state['current_lap'].item() if isinstance(state['current_lap'], np.ndarray) else state['current_lap'],
             game_time=state['game_time'].item() if isinstance(state['game_time'], np.ndarray) else state['game_time'],
+            time_since_off_road=state['time_since_off_road'].item() if isinstance(state['time_since_off_road'], np.ndarray) else state['time_since_off_road'],
             nitro_duration_time_left=state['nitro_duration_time_left'].item() if isinstance(state['nitro_duration_time_left'], np.ndarray) else state['nitro_duration_time_left'],
             nitro_fadeout_time_left=state['nitro_fadeout_time_left'].item() if isinstance(state['nitro_fadeout_time_left'], np.ndarray) else state['nitro_fadeout_time_left'],
             zipper_duration_time_left=state['zipper_duration_time_left'].item() if isinstance(state['zipper_duration_time_left'], np.ndarray) else state['zipper_duration_time_left'],
@@ -385,6 +389,7 @@ class State(TypedDict):
             'velocity': state['velocity'],
             'current_lap': state['current_lap'],
             'game_time': state['game_time'],
+            'time_since_off_road': state['time_since_off_road'],
             'nitro_duration_time_left': state['nitro_duration_time_left'],
             'nitro_fadeout_time_left': state['nitro_fadeout_time_left'],
             'zipper_duration_time_left': state['zipper_duration_time_left'],

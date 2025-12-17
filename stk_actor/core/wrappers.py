@@ -206,6 +206,14 @@ class EnhanceObservations(ActionObservationWrapper):
             shape=(),
             dtype=np.float32,
         )
+        # Add time since off-road
+        self.time_since_off_road = 0.0
+        self.observation_space['time_since_off_road'] = Box(
+            low=0.0,
+            high=float('inf'),
+            shape=(),
+            dtype=np.float32,
+        )
         # Get previous actions
         nb_actions = len(Action.get_types())
         self.observation_space['prev_actions'] = Box(
@@ -329,6 +337,11 @@ class EnhanceObservations(ActionObservationWrapper):
         observation['game_time'] = self.race_env.world.time
         # Add is on road
         observation['is_on_road'] = int(kart.is_on_road)
+        if kart.is_on_road:
+            self.time_since_off_road = 0.0
+        else:
+            self.time_since_off_road += self.race_env.config.step_size
+        observation['time_since_off_road'] = self.time_since_off_road
         # Add nitro time left
         if did_nitro:
             # If the kart used nitro, reset the nitro time left
@@ -486,6 +499,7 @@ class EnhanceObservations(ActionObservationWrapper):
         """
         if self.reset_:
             self.nb_steps = 0
+            self.time_since_off_road = 0.0
             self.prev_powerup = Powerup.NOTHING.value
             new_obs = self.get_new_observation(observation, action=None, did_nitro=False, did_zipper=False, reset=True)
         else:

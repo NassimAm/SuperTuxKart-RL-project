@@ -235,7 +235,7 @@ class DAgger:
                     state, reward, terminated, truncated, _ = env.step(action_to_play)
                     done = terminated or truncated
                     # Store episode data
-                    if state_obj['time_since_stuck'] < 3.0:  # Avoid filling buffer with a lot of stuck states
+                    if (state_obj['time_since_stuck'] < 3.0) and (state_obj['time_since_off_road'] < 3.0):  # Avoid filling buffer with a lot of stuck states
                         episode_states.append(state_tensor)
                         episode_actions.append(expert_action_tensor)
                         episode_rewards.append(reward)
@@ -262,6 +262,8 @@ class DAgger:
                         # Store the state-expert_action pair in the replay buffer
                         replay_buffer.bulk_add(episode_states, episode_actions)
             # Decay epsilon
+            if logging:
+                neptune_run["train/epsilon"].log(eps)
             eps *= eps_rate
             # Prepare the dataset from the replay buffer
             dataset = TrajectoryDataset(replay_buffer.states, replay_buffer.actions, replay_buffer.returns)

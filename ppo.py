@@ -55,11 +55,12 @@ class RolloutBuffer:
         self.values.append(value)
         self.logp.append(logp)
 
-    def compute_returns_and_advantages(self, last_value, gamma=0.99, gae_lambda=0.95):
+    def compute_returns_and_advantages(self, last_value, dones, gamma=0.99, gae_lambda=0.95):
         """Computes GAE advantages and returns.
 
         Args:
             last_value: value of the last state
+            dones: list of done flags for each step
             gamma: discount factor
             gae_lambda: GAE lambda parameter
         """
@@ -83,6 +84,9 @@ class RolloutBuffer:
         deltas = rewards + gamma * next_values * must_bootstrap - values
 
         for t in reversed(range(T)):
+            # Reset GAE at episode boundaries
+            if dones[t]:
+                last_gae = 0.0
             last_gae = deltas[t] + gamma * gae_lambda * must_bootstrap[t] * last_gae
             advantages[t] = last_gae
 
@@ -252,7 +256,7 @@ class PPOTrainer:
 
         obs, _ = self.env.reset()
         state = self._env_obs_to_tensor(obs)
-
+        dones = []
         # Track if episode continues
         for step in range(self.n_steps):
             with torch.no_grad():
@@ -278,7 +282,10 @@ class PPOTrainer:
                 logp,
             )
 
-            if terminated or truncated:
+            done = terminated or truncated
+            dones.append(done)
+
+            if done:
                 next_obs, _ = self.env.reset()
                 if terminated and self.logging:
                     self.neptune_run['train/reward'].log(reward)
@@ -291,8 +298,9 @@ class PPOTrainer:
 
         self.buffer.compute_returns_and_advantages(
             last_value=last_value,
+            dones=dones,
             gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
+            gae_lambda=self.gae_lambda
         )
 
     def update(self):
@@ -395,7 +403,7 @@ if __name__ == "__main__":
     parser.add_argument("--ent-coef", type=float, default=0.0, help="Entropy coefficient.")
     parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient.")
     parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Max gradient norm.")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate.")
     parser.add_argument("--n-epochs", type=int, default=4, help="Number of epochs per update.")
     parser.add_argument("--batch-size", type=int, default=256, help="Minibatch size.")
     parser.add_argument("--all-features", action="store_true", help="Use all features in state representation.")
