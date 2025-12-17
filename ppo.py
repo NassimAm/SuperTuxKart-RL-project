@@ -134,6 +134,7 @@ class PPOTrainer:
         logging: bool = False,
         experiment_name: Optional[str] = None,
         tags: list[str] = [],
+        render: bool = False,
     ):
         # Load environment variables
         load_dotenv(override=True)
@@ -176,7 +177,7 @@ class PPOTrainer:
         # Set self-play flag
         self.self_play = self_play
         # Initialize the environment with necessary wrappers
-        self.env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=2, num_kart=10)
+        self.env = gym.make("supertuxkart/full-v0", render_mode="human" if render else None, agent=AgentSpec(use_ai=False), difficulty=2, num_kart=10)
         wrappers = [
             lambda env: TimeLimit(env, max_episode_steps=2500),
             lambda env: ConstantSizedObservations(env, state_paths=10),
@@ -279,7 +280,7 @@ class PPOTrainer:
 
             if terminated or truncated:
                 next_obs, _ = self.env.reset()
-                if self.logging:
+                if terminated and self.logging:
                     self.neptune_run['train/reward'].log(reward)
 
             state = self._env_obs_to_tensor(next_obs)
@@ -401,6 +402,7 @@ if __name__ == "__main__":
     parser.add_argument("--logging", "-l", action="store_true", help="Enable Neptune logging.")
     parser.add_argument("--experiment-name", type=str, default=None, help="Neptune experiment name.")
     parser.add_argument("--tags", type=str, nargs='*', default=[], help="Neptune tags.")
+    parser.add_argument("--render", action="store_true", help="Render the environment during training.")
     parser.add_argument("--total-timesteps", type=int, default=100000, help="Total training timesteps.")
     parser.add_argument("--log-interval", type=int, default=1, help="Logging interval (in updates).")
     parser.add_argument("--model-save-interval", type=int, default=10, help="Model saving interval (in updates).")
@@ -427,7 +429,8 @@ if __name__ == "__main__":
         all_features=args.all_features,
         logging=args.logging,
         experiment_name=args.experiment_name,
-        tags=args.tags
+        tags=args.tags,
+        render=args.render
     )
     trainer.train(
         total_timesteps=args.total_timesteps,

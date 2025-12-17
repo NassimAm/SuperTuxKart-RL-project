@@ -53,7 +53,9 @@ class StochasticActorMLP(nn.Module):
         self.deterministic_actor = ActorMLP(input_dim, hidden_dim) if pretrained_mlp is None else pretrained_mlp
         # Add std neurons for continuous actions
         self.acceleration_log_std_layer = nn.Linear(hidden_dim, 1)
+        torch.nn.init.zeros_(self.acceleration_log_std_layer.weight)
         self.steer_log_std_layer = nn.Linear(hidden_dim, 1)
+        torch.nn.init.zeros_(self.steer_log_std_layer.weight)
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.deterministic_actor(state)
@@ -91,10 +93,10 @@ class StochasticActorMLP(nn.Module):
                 mu = atanh(mean_bounded)
 
                 log_std = self.steer_log_std_layer(std_features).squeeze(-1)
-                log_std = log_std.clamp(-5.0, 2.0)
+                log_std = log_std.clamp(-5.0, -2.5)
                 std = torch.exp(log_std)
 
-                dist = Normal(mu, std)
+                dist = Normal(mu, std + EPS)
 
                 if actions is not None:
                     a = actions[i]
@@ -120,10 +122,10 @@ class StochasticActorMLP(nn.Module):
                 mu = logit(mean_bounded)
 
                 log_std = self.acceleration_log_std_layer(std_features).squeeze(-1)
-                log_std = log_std.clamp(-5.0, 2.0)
+                log_std = log_std.clamp(-5.0, -2.5)
                 std = torch.exp(log_std)
 
-                dist = Normal(mu, std)
+                dist = Normal(mu, std + EPS)
 
                 if actions is not None:
                     a = actions[i]

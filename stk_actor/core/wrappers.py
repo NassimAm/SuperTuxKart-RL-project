@@ -592,6 +592,7 @@ class StuckObservations(ActionObservationWrapper):
         # Determine if the kart is stuck
         if not self.is_stuck:  # If not already stuck, check conditions to become stuck
             self.is_stuck = int((observation['phase'] == Phase.RACE_PHASE.value) and  # In race phase
+                                (observation['game_time'] > 1.0) and  # More than 1 second into the race
                                 (not observation['jumping']) and  # Not jumping
                                 (not self.is_being_rescued) and  # Not being rescued
                                 (last_action['acceleration'] > 0) and  # Trying to accelerate
