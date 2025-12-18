@@ -23,7 +23,7 @@ class Actor(Agent):
     def __init__(self, observation_space, action_space):
         super().__init__()
         # self.expert = ExpertAgent()
-        self.model = ActorMLP(input_dim=179, hidden_dim=512)
+        self.model = ActorMLP(input_dim=179, hidden_dim=256)
 
     def load_state_dict(self, state: dict):
         self.model.load_state_dict(state)
