@@ -184,9 +184,9 @@ class DAgger:
         print(f"Using device: {device}")
         # Initialize the actor model
         state, _ = env.reset()
-        policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=512).to(device)
+        policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256, head_dim=64).to(device)
         if with_critic:
-            critic_model = CriticMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=512).to(device)
+            critic_model = CriticMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256).to(device)
         # Prepare the replay buffer
         replay_buffer = ReplayBuffer(max_size=buffer_size)
         # Prepare the optimizer and loss function
