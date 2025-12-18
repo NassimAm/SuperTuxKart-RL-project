@@ -20,7 +20,7 @@ def logit(x: torch.Tensor) -> torch.Tensor:
 class ActorMLP(nn.Module):
     """A simple feedforward neural network for the actor."""
 
-    def __init__(self, input_dim: int, hidden_dim: int):
+    def __init__(self, input_dim: int, hidden_dim: int, head_dim: Optional[int] = None):
         super(ActorMLP, self).__init__()
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -29,11 +29,12 @@ class ActorMLP(nn.Module):
             nn.ReLU(),
         )
         self.output_types = Action.get_types()
+        head_dim = hidden_dim if head_dim is None else head_dim
         self.action_heads = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
+                nn.Linear(hidden_dim, head_dim),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, 1),
+                nn.Linear(head_dim, 1),
                 nn.Sigmoid() if (out_type == 'continuous-sigmoid') or (out_type == 'discrete') else nn.Tanh()
             )
             for action_name, out_type in self.output_types
