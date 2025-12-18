@@ -38,8 +38,7 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
     positions_data = {
         'track': [],
         'position': [],
-        'reward_mean': [],
-        'reward_std': []
+        'reward': []
     }
     for trial in tqdm_bar:
         # Get track_id
@@ -68,7 +67,7 @@ def benchmark_expert_on_difficulty(difficulty: int, data_path: str, enable_drift
         # Record the final position
         positions_data['position'].append(info['position'])
         positions_data['reward'].append(reward)
-        tqdm_bar.set_description(f"Trial {trial+1}/{nb_trials} - Position Avg: {np.mean(positions_data['position']).item():.2f}, Position Std: {np.std(positions_data['position']).item():.2f}")
+        tqdm_bar.set_description(f"Trial {trial+1}/{nb_trials} - Position Avg: {np.mean(positions_data['position']).item():.2f}, Position Std: {np.std(positions_data['position']).item():.2f}, Reward Avg: {np.mean(positions_data['reward']).item():.2f}, Reward Std: {np.std(positions_data['reward']).item():.2f}")
     # Close the environment
     env.close()
     # Save the results in file

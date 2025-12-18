@@ -270,6 +270,8 @@ class PPOTrainer:
 
             env_action = self._actions_list_to_env(actions_list)
             next_obs, reward, terminated, truncated, info = self.env.step(env_action)
+            # Clamp reward to avoid bugs
+            reward = min(reward, 20.0)
 
             terminated_flag = float(terminated)  # terminated stops bootstrap; truncated does NOT
 
