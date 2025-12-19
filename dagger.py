@@ -29,10 +29,11 @@ class ReplayBuffer:
     def __init__(self, max_size: int = 100000):
         self.states = []
         self.actions = []
+        self.advantages = []
         self.returns = []
         self.max_size = max_size
 
-    def add(self, state: torch.Tensor, action: torch.Tensor, return_: Optional[torch.Tensor] = None):
+    def add(self, state: torch.Tensor, action: torch.Tensor, advantage: Optional[torch.Tensor] = None, return_: Optional[torch.Tensor] = None):
         """Add a state-action pair to the buffer."""
         if self.size() >= self.max_size:
             self.states.pop(0)
@@ -41,15 +42,19 @@ class ReplayBuffer:
                 self.returns.pop(0)
         self.states.append(state)
         self.actions.append(action)
+        if advantage is not None:
+            self.advantages.append(advantage)
         if return_ is not None:
             self.returns.append(return_)
 
-    def bulk_add(self, states: list[torch.Tensor], actions: list[torch.Tensor], returns: Optional[list[torch.Tensor]] = None):
+    def bulk_add(self, states: list[torch.Tensor], actions: list[torch.Tensor], advantages: Optional[list[torch.Tensor]] = None, returns: Optional[list[torch.Tensor]] = None):
         """Add multiple state-action pairs to the buffer."""
+        if advantages is not None and len(advantages) > 0:
+            advantages = [None] * len(states)
         if returns is None or len(returns) == 0:
             returns = [None] * len(states)
-        for state, action, return_ in zip(states, actions, returns):
-            self.add(state, action, return_)
+        for state, action, advantage, return_ in zip(states, actions, advantages, returns):
+            self.add(state, action, advantage, return_)
 
     def size(self):
         """Return the current size of the buffer."""
@@ -115,7 +120,7 @@ class DAgger:
 
     def train(self, nb_iterations: int = 1000, epochs: int = 10, nb_races_per_iteration: int = 2,
               buffer_size: int = 100000, batch_size: int = 512, learning_rate: float = 1e-3, min_eps: float = 1e-3,
-              with_critic: bool = False, gamma: float = 0.99, gae_lambda: float = 0.95, pretrained_model_path: Optional[str] = None,
+              with_critic: bool = False, reward_informed: bool = False, gamma: float = 0.99, gae_lambda: float = 0.95, pretrained_model_path: Optional[str] = None,
               policy_model_path: str = "dagger_policy.pth", critic_model_path: str = "dagger_critic.pth", logging: bool = False, experiment_name: Optional[str] = None,
               tags: list[str] = []):
         """Train the model using the DAgger algorithm.
@@ -129,6 +134,7 @@ class DAgger:
             learning_rate (float): Learning rate for the optimizer.
             min_eps (float): Minimum epsilon for expert action selection.
             with_critic (bool): Whether to use a critic for advantage estimation.
+            reward_informed (bool): Whether to use reward-informed imitation.
             gamma (float): Discount factor for GAE.
             gae_lambda (float): GAE lambda parameter.
             pretrained_model_path (Optional[str]): Path to a pretrained model to initialize the policy.
@@ -138,6 +144,8 @@ class DAgger:
             experiment_name (Optional[str]): Name of the experiment for logging.
             tags (list[str]): Tags for the Neptune experiment.
         """
+        if reward_informed and not with_critic:
+            raise ValueError("Reward-informed imitation requires a critic to be used.")
         # Load environment variables
         load_dotenv(override=True)
         # Setup neptune for logging if enabled
@@ -197,12 +205,13 @@ class DAgger:
         policy_optimizer = torch.optim.Adam(policy_model.parameters(), lr=learning_rate)
         if with_critic:
             critic_optimizer = torch.optim.Adam(critic_model.parameters(), lr=learning_rate)
-        mse_fn = torch.nn.MSELoss()
-        bce_fn = torch.nn.BCELoss()
+        mse_fn = torch.nn.MSELoss(reduction="none" if reward_informed else "mean")
+        bce_fn = torch.nn.BCELoss(reduction="none" if reward_informed else "mean")
         action_types = Action.get_types()
         # Start DAgger iterations
         eps = 1.0
         eps_rate = min_eps ** (1 / nb_iterations)
+        beta = 1.0 - eps
         tqdm_bar = tqdm(range(nb_iterations), desc="DAgger Training")
         for it in tqdm_bar:
             # Set model to eval mode
@@ -266,16 +275,12 @@ class DAgger:
                             device=device
                         )
                         # Store the state-expert_action-return triplet in the replay buffer
-                        replay_buffer.bulk_add(episode_states[:-1], episode_actions, returns)
+                        replay_buffer.bulk_add(episode_states[:-1], episode_actions, advantages, returns)
                     else:
                         # Store the state-expert_action pair in the replay buffer
                         replay_buffer.bulk_add(episode_states, episode_actions)
-            # Decay epsilon
-            if logging:
-                neptune_run["train/epsilon"].log(eps)
-            eps *= eps_rate
             # Prepare the dataset from the replay buffer
-            dataset = TrajectoryDataset(replay_buffer.states, replay_buffer.actions, replay_buffer.returns)
+            dataset = TrajectoryDataset(replay_buffer.states, replay_buffer.actions, replay_buffer.advantages, replay_buffer.returns)
             train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
             # Set model to train mode
             policy_model.train()
@@ -288,11 +293,18 @@ class DAgger:
             # Train the model for several epochs
             for epoch in range(epochs):
                 # Training step
-                for states_batch, actions_batch, returns_batch in train_loader:
+                for states_batch, actions_batch, advantage_batch, returns_batch in train_loader:
                     # Move batch to device
                     states_batch = states_batch.to(device)
                     actions_batch = actions_batch.to(device)
+                    advantage_batch = advantage_batch.to(device)
+                    # normalize advantages
+                    advantage_batch = (advantage_batch - advantage_batch.mean()) / (advantage_batch.std() + 1e-8)
                     returns_batch = returns_batch.to(device)
+                    # Compute weights for reward-informed losses
+                    if reward_informed:
+                        weights = torch.exp(beta * advantage_batch)
+                        weights = weights.clamp(0.3, 3.0)
                     # Policy forward pass
                     policy_optimizer.zero_grad()
                     pred_actions = policy_model(states_batch)
@@ -305,7 +317,10 @@ class DAgger:
                     for i, ((name, action_type), pred_action) in enumerate(zip(action_types, pred_actions)):
                         # Compute loss and accuracy for each action dimension according to its type
                         if action_type == 'discrete':
-                            action_loss = bce_fn(pred_action, actions_batch[:, i])
+                            if reward_informed:
+                                action_loss = (bce_fn(pred_action, actions_batch[:, i]) * weights).mean()
+                            else:
+                                action_loss = bce_fn(pred_action, actions_batch[:, i])
                             acc = ((pred_action >= 0.5).int() == actions_batch[:, i]).float().mean()
                             if logging:
                                 if f'{name}_accuracy' not in train_stats:
@@ -315,7 +330,10 @@ class DAgger:
                                     train_stats[f'{name}_loss'] = []
                                 train_stats[f'{name}_loss'].append(action_loss.item())
                         else:
-                            action_loss = mse_fn(pred_action, actions_batch[:, i])
+                            if reward_informed:
+                                action_loss = (mse_fn(pred_action, actions_batch[:, i]) * weights).mean()
+                            else:
+                                action_loss = mse_fn(pred_action, actions_batch[:, i])
                             if logging:
                                 if f'{name}_loss' not in train_stats:
                                     train_stats[f'{name}_loss'] = []
@@ -327,7 +345,7 @@ class DAgger:
                     total_loss = policy_loss
                     # Compute critic loss
                     if with_critic:
-                        value_loss = mse_fn(values, returns_batch)
+                        value_loss = mse_fn(values, returns_batch).mean() if reward_informed else mse_fn(values, returns_batch)
                         train_stats['critic_loss'].append(value_loss.item())
                         total_loss += value_loss
                     # Backpropagation
@@ -353,6 +371,11 @@ class DAgger:
                     # Upload critic model to neptune
                     if with_critic:
                         neptune_run["model/dagger_critic"].upload(critic_model_path)
+            # Decay epsilon
+            if logging:
+                neptune_run["train/epsilon"].log(eps)
+            eps *= eps_rate
+            beta = 1.0 - eps
             # Update progress bar description
             tqdm_bar.set_description(f"Iteration {it+1}/{nb_iterations} - Train Loss: {np.mean(train_stats['policy_loss']).item():.2f}")
 
@@ -382,6 +405,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for the optimizer.")
     parser.add_argument("--min_eps", type=float, default=1e-3, help="Minimum epsilon for expert action selection.")
     parser.add_argument("--with_critic", action="store_true", help="Whether to use a critic for advantage estimation.")
+    parser.add_argument("--reward_informed", action="store_true", help="Whether to use reward-informed imitation.")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor for GAE.")
     parser.add_argument("--gae_lambda", type=float, default=0.95, help="GAE lambda parameter.")
     parser.add_argument("--pretrained_model_path", type=str, default=None, help="Path to a pretrained model to initialize the policy.")
@@ -403,6 +427,7 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         min_eps=args.min_eps,
         with_critic=args.with_critic,
+        reward_informed=args.reward_informed,
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
         pretrained_model_path=args.pretrained_model_path,
