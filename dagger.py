@@ -2,7 +2,6 @@
 We opt for this approach as the sb3 DAgger implementation lacks support for custom losses."""
 
 
-import random
 import gymnasium as gym
 from gymnasium.wrappers import TimeLimit
 from pystk2_gymnasium import AgentSpec
@@ -203,6 +202,8 @@ class DAgger:
         for it in tqdm_bar:
             # Set model to eval mode
             policy_model.eval()
+            # Expert portion
+            expert_portion = eps * 100
             # Run several races to collect data
             for _ in range(nb_races_per_iteration):
                 # Initialize episode data
@@ -213,6 +214,7 @@ class DAgger:
                 # Rollout episode
                 done = False
                 state, _ = env.reset()
+                nb_steps = 0
                 while not done:
                     # Get the expert action
                     expert_action = expert_agent.act(state)
@@ -222,7 +224,7 @@ class DAgger:
                     # Convert expert action to tensor
                     expert_action_tensor = Action.to_model(Action.from_env(expert_action))
                     # Get the expert action with probability eps
-                    if random.random() < eps:
+                    if nb_steps < expert_portion:
                         action_to_play = expert_action
                     else:
                         with torch.no_grad():
@@ -234,12 +236,14 @@ class DAgger:
                     # Step in the environment
                     state, reward, terminated, truncated, _ = env.step(action_to_play)
                     done = terminated or truncated
+                    nb_steps += 1
+                    if nb_steps >= 100:
+                        nb_steps = 0
                     # Store episode data
-                    if (state_obj['time_since_stuck'] < 3.0) and (state_obj['time_since_off_road'] < 3.0):  # Avoid filling buffer with a lot of stuck states
-                        episode_states.append(state_tensor)
-                        episode_actions.append(expert_action_tensor)
-                        episode_rewards.append(reward)
-                        episode_terminated.append(float(terminated))
+                    episode_states.append(state_tensor)
+                    episode_actions.append(expert_action_tensor)
+                    episode_rewards.append(reward)
+                    episode_terminated.append(float(terminated))
                 # If we are training a critic, compute episode return (GAE)
                 if len(episode_states) > 0:
                     if with_critic:
