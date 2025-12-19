@@ -293,6 +293,61 @@ class State(TypedDict):
         'prev_actions'
     ]
 
+    def empty(state_items: int = 5, state_karts: int = 5, state_paths: int = 10, previous_action_horizon: int = 1) -> 'State':
+        return State(
+            rank=0.0,
+            attachment=Attachment.NOTHING,
+            attachment_time_left=0.0,
+            aux_ticks=0.0,
+            center_path=np.zeros((3,)),
+            center_path_distance=0.0,
+            distance_down_track=0.0,
+            overall_distance_ratio=0.0,
+            full_track_distance=0.0,
+            energy=0.0,
+            front=np.zeros((3,)),
+            items_position=np.zeros((state_items, 3)),
+            items_type=[ItemType.BANANA] * state_items,
+            jumping=False,
+            is_on_road=True,
+            stuck=False,
+            time_since_stuck=0.0,
+            karts_position=np.zeros((state_karts, 3)),
+            karts_rel_rank=np.zeros((state_karts,)),
+            karts_velocity=np.zeros((state_karts, 3)),
+            karts_distance=np.zeros((state_karts,)),
+            karts_attachment=[Attachment.NOTHING] * state_karts,
+            max_steer_angle=0.0,
+            paths_distance=np.zeros((state_paths,)),
+            paths_end=np.zeros((state_paths, 3)),
+            paths_start=np.zeros((state_paths, 3)),
+            paths_width=np.zeros((state_paths,)),
+            phase=Phase.READY_PHASE,
+            should_accelerate_in_start=False,
+            powerup=Powerup.NOTHING,
+            shield_time=0.0,
+            skeed_factor=0.0,
+            velocity=np.zeros((3,)),
+            nitro_duration_time_left=0.0,
+            nitro_fadeout_time_left=0.0,
+            zipper_duration_time_left=0.0,
+            zipper_fadeout_time_left=0.0,
+            skid_direction=0,
+            time_since_skid_start=0.0,
+            time_since_last_fire=0.0,
+            prev_actions=[Action.empty()] * previous_action_horizon,
+            current_lap=0,
+            game_time=0.0,
+            time_since_off_road=0.0,
+            track_direction=DirectionType.DIR_UNDEFINED,
+            speed_radius_ratio=0.0,
+            target_position=np.zeros((3,)),
+            curve_duration=0.0,
+            avoid_obstacle=False,
+            obstacle_position=np.zeros((3,)),
+            obstacle_velocity=np.zeros((3,))
+        )
+
     def from_env(state: dict) -> 'State':
         """Create a State from a flattened array representation."""
 
@@ -537,3 +592,80 @@ class State(TypedDict):
                 # torch.tensor(state['obstacle_velocity'].reshape(-1), dtype=torch.float32),
                 torch.cat([Action.to_model(a) for a in state['prev_actions']])
             ])
+
+    def to_array(state: 'State', state_karts: int = 5) -> np.ndarray:
+        """Convert the state to the model's expected format."""
+        # Items can be very far so we clip distances to a max value
+        max_item_distance = 50.0
+        items_position = state['items_position'].copy()
+        items_position[:, 2] = np.clip(items_position[:, 2], 0.0, max_item_distance)
+        # Karts can be very far so we clip distances to a max value
+        max_kart_distance = 50.0
+        karts_position = state['karts_position'].copy()
+        karts_position[:, 2] = np.clip(karts_position[:, 2], 0.0, max_kart_distance)
+        karts_rel_rank = state['karts_rel_rank']
+        karts_velocity = state['karts_velocity']
+        karts_distance = np.clip(state['karts_distance'], 0.0, max_kart_distance)
+        karts_attachment = state['karts_attachment']
+        # Add zero padding or truncate to have fixed number of karts
+        if karts_position.shape[0] < state_karts:
+            position_padding = np.zeros((state_karts - karts_position.shape[0], 3), dtype=karts_position.dtype)
+            karts_position = np.vstack([karts_position, position_padding])
+            karts_rel_rank = np.hstack([karts_rel_rank, np.zeros(state_karts - karts_rel_rank.shape[0], dtype=karts_rel_rank.dtype)])
+            velocity_padding = np.zeros((state_karts - karts_velocity.shape[0], 3), dtype=karts_velocity.dtype)
+            karts_velocity = np.vstack([karts_velocity, velocity_padding])
+            karts_distance = np.hstack([karts_distance, np.zeros(state_karts - karts_distance.shape[0], dtype=karts_distance.dtype)])
+            karts_attachment += [Attachment.NOTHING] * (state_karts - len(karts_attachment))
+        return np.concatenate([
+            # Race stats
+            np.array([state['rank']], dtype=np.float32),
+            np.array([state['distance_down_track']], dtype=np.float32),
+            np.array([int(state['phase'].value > Phase.READY_PHASE.value)], dtype=np.float32),
+            np.array([int(state['should_accelerate_in_start'])], dtype=np.float32),
+            # Kart internal state
+            state['velocity'].reshape(-1),
+            np.array([int(state['jumping'])], dtype=np.float32),
+            np.array([int(state['is_on_road'])], dtype=np.float32),
+            np.array([int(state['stuck'])], dtype=np.float32),
+            np.array([state['time_since_stuck']], dtype=np.float32),
+            np.array([state['time_since_last_fire']], dtype=np.float32),
+            # Important data for steering
+            state['target_position'].reshape(-1),
+            np.array([state['max_steer_angle']], dtype=np.float32),
+            np.array([state['center_path_distance']], dtype=np.float32),
+            np.array([state['paths_width'][0]], dtype=np.float32),
+            # Important data for avoiding obstacles
+            np.array([int(state['avoid_obstacle'])], dtype=np.float32),
+            state['obstacle_position'].reshape(-1),
+            state['obstacle_velocity'].reshape(-1),
+            # Important data for braking
+            np.array([state['speed_radius_ratio']], dtype=np.float32),
+            # Important data for drifting
+            state['track_direction'].encode(),
+            np.array([state['curve_duration']], dtype=np.float32),
+            np.array([state['skid_direction']], dtype=np.float32),
+            np.array([state['time_since_skid_start']], dtype=np.float32),
+            np.array([state['skeed_factor']], dtype=np.float32),
+            # Powerup
+            state['powerup'].encode(),
+            # Attachment
+            state['attachment'].encode(),
+            np.array([state['attachment_time_left']], dtype=np.float32),
+            # Nitro and Zipper
+            np.array([state['energy']], dtype=np.float32),
+            np.array([state['nitro_duration_time_left']], dtype=np.float32),
+            np.array([state['nitro_fadeout_time_left']], dtype=np.float32),
+            np.array([state['zipper_duration_time_left']], dtype=np.float32),
+            np.array([state['zipper_fadeout_time_left']], dtype=np.float32),
+            # Items
+            items_position.reshape(-1),
+            np.concatenate([e.encode() for e in state['items_type']]),
+            # Other karts
+            karts_position.reshape(-1),
+            karts_rel_rank.reshape(-1),
+            karts_velocity.reshape(-1),
+            karts_distance.reshape(-1),
+            np.concatenate([e.encode() for e in karts_attachment]),
+            # Previous actions
+            np.concatenate([Action.to_array(a) for a in state['prev_actions']])
+        ])

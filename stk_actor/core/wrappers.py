@@ -1,7 +1,7 @@
 from gymnasium import Env, ObservationWrapper
 from gymnasium.spaces import Box, Discrete
 from pystk2_gymnasium.definitions import ActionObservationWrapper
-from .state import Phase, Powerup, Attachment, DirectionType, ItemType
+from .state import State, Phase, Powerup, Attachment, DirectionType, ItemType
 from .action import Action
 from .expert import ExpertAgent
 from .utils import from_cartesian_to_polar, get_xz_angle_between, rotate
@@ -1111,3 +1111,37 @@ class CustomPolarObservations(ObservationWrapper):
                 obs[key] = tuple(x for x in v)
 
         return obs
+
+
+class ObservationFlattenner(ObservationWrapper):
+    """Flattens the observation dictionary into a single array."""
+
+    def __init__(self, env: Env):
+        """Initializes the ObservationFlattener.
+
+        Args:
+            env (Env): The environment to wrap.
+        """
+        super().__init__(env)
+        # Compute the total size of the flattened observation
+        empty_state = State.empty()
+        self.flat_size = State.to_array(empty_state).shape[0]
+        # Define the new observation space
+        self.observation_space = Box(
+            low=-float('inf'),
+            high=float('inf'),
+            shape=(self.flat_size,),
+            dtype=np.float32,
+        )
+
+    def observation(self, observation):
+        """Flattens the observation dictionary into a single array.
+
+        Args:
+            observation (dict): The original observation.
+
+        Returns:
+            np.ndarray: The flattened observation.
+        """
+        state_obj = State.from_env(observation)
+        return State.to_array(state_obj)

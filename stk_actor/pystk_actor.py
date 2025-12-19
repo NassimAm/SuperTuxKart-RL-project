@@ -6,7 +6,7 @@ import gymnasium as gym
 # IMPORTANT: note the relative import
 from .actors import Actor, ArgmaxActor, SamplingActor
 from pystk2_gymnasium.stk_wrappers import ConstantSizedObservations
-from .core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations
+from .core.wrappers import EnhanceObservations, CustomPolarObservations, StuckObservations, ExpertObservations, ObservationFlattenner
 
 #: The base environment name (you can change that)
 env_name = "supertuxkart/full-v0"
@@ -23,7 +23,8 @@ def get_wrappers() -> List[Callable[[gym.Env], gym.Wrapper]]:
         lambda env: EnhanceObservations(env, previous_action_horizon=1, eval=True),
         lambda env: StuckObservations(env, eval=True),
         lambda env: ExpertObservations(env),
-        lambda env: CustomPolarObservations(env)
+        lambda env: CustomPolarObservations(env),
+        lambda env: ObservationFlattenner(env)
     ]
 
 

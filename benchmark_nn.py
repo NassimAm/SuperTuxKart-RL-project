@@ -19,6 +19,8 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
         nb_races_per_track (int): The number of races to run per track.
         all_features (bool): Whether the model uses all features or not.
     """
+    if all_features:
+        print("Benchmarking with all features enabled.")
     # Load the environment
     env = gym.make("supertuxkart/full-v0", render_mode=None, agent=AgentSpec(use_ai=False), difficulty=difficulty, num_kart=10)
     wrappers = [
@@ -34,7 +36,7 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
     tracks = env.unwrapped.TRACKS
     # Load the actor model
     state, _ = env.reset()
-    actor = Actor(model_path, State.to_model(State.from_env(state), all_features=all_features).shape[0], 512)
+    actor = Actor(model_path, State.to_model(State.from_env(state), all_features=all_features).shape[0], hidden_dim=256, head_dim=64)
     # Run multiple trials
     nb_trials = nb_races_per_track * len(tracks)
     tqdm_bar = tqdm(range(nb_trials), desc="Trials")
@@ -57,7 +59,7 @@ def benchmark_nn(model_path: str, data_path: str, difficulty: int = 2, nb_races_
         # Run the episode
         while not done:
             # Get actor action
-            action = actor.act(state)
+            action = actor.act(state, all_features=all_features)
 
             # Step the environment
             next_state, reward, terminated, truncated, info = env.step(
