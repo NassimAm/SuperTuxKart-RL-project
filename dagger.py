@@ -115,8 +115,8 @@ class DAgger:
 
     def train(self, nb_iterations: int = 1000, epochs: int = 10, nb_races_per_iteration: int = 2,
               buffer_size: int = 100000, batch_size: int = 512, learning_rate: float = 1e-3, min_eps: float = 1e-3,
-              with_critic: bool = False, gamma: float = 0.99, gae_lambda: float = 0.95, policy_model_path: str = "dagger_policy.pth",
-              critic_model_path: str = "dagger_critic.pth", logging: bool = False, experiment_name: Optional[str] = None,
+              with_critic: bool = False, gamma: float = 0.99, gae_lambda: float = 0.95, pretrained_model_path: Optional[str] = None,
+              policy_model_path: str = "dagger_policy.pth", critic_model_path: str = "dagger_critic.pth", logging: bool = False, experiment_name: Optional[str] = None,
               tags: list[str] = []):
         """Train the model using the DAgger algorithm.
 
@@ -131,6 +131,7 @@ class DAgger:
             with_critic (bool): Whether to use a critic for advantage estimation.
             gamma (float): Discount factor for GAE.
             gae_lambda (float): GAE lambda parameter.
+            pretrained_model_path (Optional[str]): Path to a pretrained model to initialize the policy.
             policy_model_path (str): Path to save the trained policy model.
             critic_model_path (str): Path to save the trained critic model.
             logging (bool): Whether to log the training process to Neptune.
@@ -183,7 +184,11 @@ class DAgger:
         print(f"Using device: {device}")
         # Initialize the actor model
         state, _ = env.reset()
-        policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256, head_dim=64).to(device)
+        if pretrained_model_path is None:
+            policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256, head_dim=64).to(device)
+        else:
+            policy_model = ActorMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256, head_dim=64).to(device)
+            policy_model.load_state_dict(torch.load(pretrained_model_path, map_location=device))
         if with_critic:
             critic_model = CriticMLP(input_dim=State.to_model(State.from_env(state)).shape[0], hidden_dim=256).to(device)
         # Prepare the replay buffer
@@ -379,6 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--with_critic", action="store_true", help="Whether to use a critic for advantage estimation.")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor for GAE.")
     parser.add_argument("--gae_lambda", type=float, default=0.95, help="GAE lambda parameter.")
+    parser.add_argument("--pretrained_model_path", type=str, default=None, help="Path to a pretrained model to initialize the policy.")
     parser.add_argument("--policy_model_path", type=str, default="dagger_policy.pth", help="Path to save the trained policy model.")
     parser.add_argument("--critic_model_path", type=str, default="dagger_critic.pth", help="Path to save the trained critic model.")
     parser.add_argument("--logging", '-l', action="store_true", help="Whether to log the training process to Neptune.")
@@ -399,6 +405,7 @@ if __name__ == "__main__":
         with_critic=args.with_critic,
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
+        pretrained_model_path=args.pretrained_model_path,
         policy_model_path=args.policy_model_path,
         critic_model_path=args.critic_model_path,
         logging=args.logging,
