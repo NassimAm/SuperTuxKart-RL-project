@@ -205,19 +205,20 @@ class PPOTrainer:
         # Policy model
         pretrained_policy = None
         if pretrained_policy_path is not None:
-            pretrained_policy = ActorMLP(input_dim=self.obs_dim, hidden_dim=512).to(self.device)
+            pretrained_policy = ActorMLP(input_dim=self.obs_dim, hidden_dim=256, head_dim=64).to(self.device)
             pretrained_state = torch.load(pretrained_policy_path, weights_only=True, map_location=self.device)
             pretrained_policy.load_state_dict(pretrained_state)
             print(f"Loaded pretrained policy from {pretrained_policy_path}")
         self.actor = StochasticActorMLP(
             input_dim=self.obs_dim,
-            hidden_dim=512,
+            hidden_dim=256,
+            head_dim=64,
             pretrained_mlp=pretrained_policy,
         ).to(self.device)
         # Critic model
         self.critic = CriticMLP(
             input_dim=self.obs_dim,
-            hidden_dim=512,
+            hidden_dim=256,
         ).to(self.device)
         if pretrained_critic_path is not None:
             pretrained_critic_state = torch.load(pretrained_critic_path, weights_only=True, map_location=self.device)

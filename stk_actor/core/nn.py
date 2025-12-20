@@ -49,14 +49,20 @@ class ActorMLP(nn.Module):
 class StochasticActorMLP(nn.Module):
     """A stochastic adaptation of the ActorMLP."""
 
-    def __init__(self, input_dim: int, hidden_dim: int, pretrained_mlp: Optional[ActorMLP] = None):
+    def __init__(self, input_dim: int, hidden_dim: int, head_dim: Optional[int] = None, pretrained_mlp: Optional[ActorMLP] = None):
         super(StochasticActorMLP, self).__init__()
-        self.deterministic_actor = ActorMLP(input_dim, hidden_dim) if pretrained_mlp is None else pretrained_mlp
+        self.deterministic_actor = ActorMLP(input_dim, hidden_dim, head_dim) if pretrained_mlp is None else pretrained_mlp
         # Add std neurons for continuous actions
-        self.acceleration_log_std_layer = nn.Linear(hidden_dim, 1)
-        torch.nn.init.zeros_(self.acceleration_log_std_layer.weight)
-        self.steer_log_std_layer = nn.Linear(hidden_dim, 1)
-        torch.nn.init.zeros_(self.steer_log_std_layer.weight)
+        self.acceleration_std_layer = nn.Sequential(
+            nn.Linear(hidden_dim, 1),
+            nn.ReLU()
+        )
+        torch.nn.init.zeros_(self.acceleration_std_layer[0].weight)
+        self.steer_std_layer = nn.Sequential(
+            nn.Linear(hidden_dim, 1),
+            nn.ReLU()
+        )
+        torch.nn.init.zeros_(self.steer_std_layer[0].weight)
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.deterministic_actor(state)
@@ -93,9 +99,8 @@ class StochasticActorMLP(nn.Module):
                 # mean in [-1,1] -> mean in R
                 mu = atanh(mean_bounded)
 
-                log_std = self.steer_log_std_layer(std_features).squeeze(-1)
-                log_std = log_std.clamp(-5.0, -2.5)
-                std = torch.exp(log_std)
+                std = self.steer_std_layer(std_features).squeeze(-1)
+                std = std.clamp(0.0, 0.1)
 
                 dist = Normal(mu, std + EPS)
 
@@ -122,9 +127,8 @@ class StochasticActorMLP(nn.Module):
                 # mean in [0,1] -> mean in R
                 mu = logit(mean_bounded)
 
-                log_std = self.acceleration_log_std_layer(std_features).squeeze(-1)
-                log_std = log_std.clamp(-5.0, -2.5)
-                std = torch.exp(log_std)
+                std = self.acceleration_std_layer(std_features).squeeze(-1)
+                std = std.clamp(0.0, 0.1)
 
                 dist = Normal(mu, std + EPS)
 
