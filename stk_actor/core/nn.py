@@ -52,14 +52,15 @@ class StochasticActorMLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, head_dim: Optional[int] = None, pretrained_mlp: Optional[ActorMLP] = None):
         super(StochasticActorMLP, self).__init__()
         self.deterministic_actor = ActorMLP(input_dim, hidden_dim, head_dim) if pretrained_mlp is None else pretrained_mlp
+        self.head_dim = head_dim if head_dim is not None else hidden_dim
         # Add std neurons for continuous actions
         self.acceleration_std_layer = nn.Sequential(
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(self.head_dim, 1),
             nn.ReLU()
         )
         torch.nn.init.zeros_(self.acceleration_std_layer[0].weight)
         self.steer_std_layer = nn.Sequential(
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(self.head_dim, 1),
             nn.ReLU()
         )
         torch.nn.init.zeros_(self.steer_std_layer[0].weight)
